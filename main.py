@@ -1,130 +1,51 @@
-import os
-
-# --- Network / Proxy notes ---
-# AkShare 的部分接口会请求 eastmoney 域名（例如 80.push2.eastmoney.com）。
-# 如果你的环境里配置了 HTTP(S)_PROXY，但代理不可用，就会触发 ProxyError。
-# 下面默认让 eastmoney 域名走直连（通过 NO_PROXY 绕过代理）。
-# 如需彻底禁用代理（对所有请求都直连），可在环境变量里设置：RRG_DISABLE_PROXY=1
-
-if os.environ.get("RRG_DISABLE_PROXY", "0") == "1":
-    for _k in (
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-    ):
-        os.environ.pop(_k, None)
-
-if os.environ.get("RRG_EASTMONEY_NO_PROXY", "1") != "0":
-    _hosts = ["80.push2.eastmoney.com", ".eastmoney.com", "eastmoney.com"]
-    _existing = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
-    _parts = [p.strip() for p in _existing.split(",") if p.strip()]
-    _lower = {p.lower() for p in _parts}
-    for _h in _hosts:
-        if _h.lower() not in _lower:
-            _parts.append(_h)
-    _merged = ",".join(_parts)
-    os.environ["NO_PROXY"] = _merged
-    os.environ["no_proxy"] = _merged
-
 import akshare as ak
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import zscore
-import requests
+import os
+
+
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
+plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 # ======================
-# 参数区（你之后重点调的地方）
+# 参数区
 # ======================
-START_DATE = "20230101"
-END_DATE = "20251201"
-LOOKBACK_RS = 20      # 相对强弱平滑窗口
-LOOKBACK_MOM = 10     # 动量窗口
-TRAIL_DAYS = 20       # 画多少天的轨迹
+LOOKBACK_RS = 20
+LOOKBACK_MOM = 10
+TRAIL_DAYS = 20
 
 # ======================
-# 1. 获取指数数据
+# ETF 数据
 # ======================
-def get_index(code):
-    def _fetch():
-        return ak.index_zh_a_hist(
-            symbol=code,
-            period="daily",
-            start_date=START_DATE,
-            end_date=END_DATE,
-        )
-
-    try:
-        df = _fetch()
-    except requests.exceptions.ConnectionError as e:
-        # 检查是否是域名解析错误
-        msg = str(e)
-        is_dns_error = "NameResolutionError" in msg or "getaddrinfo failed" in msg
+def get_etf(symbol):
+    # 确保 data 目录存在
+    if not os.path.exists("data"):
+        os.makedirs("data")
         
-        # 如果是 DNS 错误，且当前启用了 RRG_EASTMONEY_NO_PROXY（即强制直连），尝试回退到使用代理
-        if is_dns_error and os.environ.get("RRG_EASTMONEY_NO_PROXY", "1") != "0":
-            print(f"Warning: 捕获到域名解析错误 ({e})。尝试移除 NO_PROXY 设置（使用系统代理）重试...")
-            
-            # 临时移除 eastmoney 相关域名从 NO_PROXY
-            _hosts = {"80.push2.eastmoney.com", ".eastmoney.com", "eastmoney.com"}
-            _backup_env = {}
-            
-            for k in ["NO_PROXY", "no_proxy"]:
-                val = os.environ.get(k, "")
-                if val:
-                    _backup_env[k] = val
-                    parts = [p.strip() for p in val.split(",") if p.strip()]
-                    # 过滤掉 eastmoney 相关的
-                    new_parts = [p for p in parts if p not in _hosts and p not in _hosts] # simple check
-                    # 更严谨的过滤
-                    new_parts = [p for p in parts if p not in _hosts]
-                    os.environ[k] = ",".join(new_parts)
-            
-            try:
-                df = _fetch()
-                print("重试成功！建议设置环境变量 RRG_EASTMONEY_NO_PROXY=0 以永久生效。")
-            except Exception as retry_e:
-                # 恢复环境变量（可选，但为了保持状态一致性）
-                for k, v in _backup_env.items():
-                    os.environ[k] = v
-                    
-                raise RuntimeError(
-                    "重试失败。请检查网络连接或代理配置。\n"
-                    "尝试了直连和代理两种方式，均无法解析域名或连接失败。"
-                ) from retry_e
-        else:
-            if is_dns_error:
-                 raise RuntimeError(
-                    "请求数据时发生域名解析错误 (NameResolutionError)。\n"
-                    "原因可能是：\n"
-                    "1. 你的网络环境无法直接解析 eastmoney 域名（可能是内网或防火墙限制）。\n"
-                    "2. 检查网络连接是否正常。"
-                ) from e
-            raise e
+    file_path = os.path.join("data", f"{symbol}.csv")
+    
+    if os.path.exists(file_path):
+        print(f"Loading {symbol} from local cache...")
+        df = pd.read_csv(file_path)
+    else:
+        print(f"Downloading {symbol}...")
+        df = ak.fund_etf_hist_em(symbol=symbol, period="daily", adjust="qfq")
+        df.to_csv(file_path, index=False)
 
-    except requests.exceptions.ProxyError as e:
-        raise RuntimeError(
-            "请求数据时发生代理错误：你的环境可能配置了 HTTP(S)_PROXY，但代理不可用。\n"
-            "处理方式：\n"
-            "1) 让 eastmoney 直连：保持默认即可（已设置 NO_PROXY 包含 eastmoney.com）。\n"
-            "2) 或彻底禁用代理：在运行前设置环境变量 RRG_DISABLE_PROXY=1。\n"
-            "3) 或修复/替换系统代理配置。"
-        ) from e
-        
     df["date"] = pd.to_datetime(df["日期"])
     df = df.set_index("date")
     return df["收盘"].astype(float)
 
 # ======================
-# 2. 构建 RRG 指标
+# RRG 指标
 # ======================
 def compute_rrg(price, benchmark):
     rs = price / benchmark
     rs_smooth = rs.rolling(LOOKBACK_RS).mean()
-    rs_norm = zscore(rs_smooth.dropna())
+    rs_dropped = rs_smooth.dropna()
+    rs_norm = pd.Series(zscore(rs_dropped), index=rs_dropped.index)
 
     mom = rs_norm - rs_norm.shift(LOOKBACK_MOM)
     mom = mom.dropna()
@@ -136,34 +57,67 @@ def compute_rrg(price, benchmark):
     return df
 
 # ======================
-# 3. 示例：行业 vs 沪深300
+# ETF 组合
 # ======================
-benchmark = get_index("sh000300")  # 沪深300
+benchmark = get_etf("510300")  # 沪深300 ETF
 
 targets = {
-    "消费": "000932",
-    "医药": "000933",
-    "新能源": "399808",
-    "科技": "399006"
+    "消费": "159928",
+    "医药": "512010",
+    # "新能源": "516160",
+    # "科技": "515000"
 }
 
-plt.figure(figsize=(8, 8))
+# ======================
+# 画 RRG
+# ======================
+num_targets = len(targets)
+cols = min(2, num_targets)
+rows = (num_targets + cols - 1) // cols
 
-for name, code in targets.items():
-    price = get_index(code)
+fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 6 * rows))
+if num_targets == 1:
+    axes = [axes]
+else:
+    axes = axes.flatten()
+
+for i, (name, code) in enumerate(targets.items()):
+    ax = axes[i]
+    price = get_etf(code)
     df = compute_rrg(price, benchmark)
 
     trail = df.iloc[-TRAIL_DAYS:]
-    plt.plot(trail["RS"], trail["MOM"], marker="o", label=name)
-    plt.scatter(trail["RS"].iloc[-1], trail["MOM"].iloc[-1])
+    
+    # 准备箭头数据
+    x = trail["RS"].values
+    y = trail["MOM"].values
+    u = np.diff(x)
+    v = np.diff(y)
+    
+    # 画轨迹线
+    ax.plot(x, y, color='gray', alpha=0.3, linewidth=1)
+    
+    # 画箭头 (从点 i 指向 i+1)
+    # angles='xy', scale_units='xy', scale=1 确保箭头方向和长度与数据坐标一致
+    ax.quiver(x[:-1], y[:-1], u, v, angles='xy', scale_units='xy', scale=1, 
+              color='tab:blue', width=0.006, headwidth=4, headlength=5, alpha=0.8)
+    
+    # 标记最新点
+    ax.scatter(x[-1], y[-1], color='red', s=50, zorder=5)
+    
+    # 坐标轴和网格
+    ax.axhline(0, linestyle="--", alpha=0.5, color='black')
+    ax.axvline(0, linestyle="--", alpha=0.5, color='black')
+    
+    ax.set_title(f"{name} ({code})")
+    ax.set_xlabel("Relative Strength (RS)")
+    ax.set_ylabel("Momentum (MOM)")
+    ax.grid(True, alpha=0.3)
 
-# 原点 & 轴线
-plt.axhline(0, color="gray", linestyle="--", alpha=0.5)
-plt.axvline(0, color="gray", linestyle="--", alpha=0.5)
+# 隐藏多余的子图
+for j in range(i + 1, len(axes)):
+    axes[j].axis('off')
 
-plt.xlabel("Relative Strength")
-plt.ylabel("Momentum")
-plt.title("Relative Rotation Graph (RRG)")
-plt.legend()
-plt.grid(alpha=0.3)
+plt.suptitle("ETF Relative Rotation Graph (RRG)", fontsize=16)
+plt.tight_layout()
 plt.show()
