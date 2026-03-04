@@ -30,7 +30,7 @@ export async function PUT(
     const allocation = await prisma.assetAllocation.update({
       where: { id },
       data: {
-        targetAmount: data.targetAmount,
+        targetPercent: data.targetPercent,
       },
       include: { asset: true, account: true },
     });

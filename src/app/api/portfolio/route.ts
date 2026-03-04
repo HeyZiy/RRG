@@ -57,10 +57,21 @@ export async function GET(request: NextRequest) {
 
     const totalValue = account.cash + holdingsValue;
 
+    // Determine the base value for allocation calculation
+    // If targetAmount is set (Preset Investment Amount), use it.
+    // Otherwise use totalValue (Account Ratio based on current net worth).
+    const allocationBaseValue = (account.targetAmount && account.targetAmount > 0) 
+        ? account.targetAmount 
+        : totalValue;
+
     // 2. Calculate Drift & Actions
     const items = Array.from(positions.values()).map(p => {
+        // currentPercent is always based on actual totalValue (Net Worth) to show reality
         const currentPercent = totalValue > 0 ? (p.currentValue / totalValue) * 100 : 0;
-        const targetValue = totalValue * (p.targetPercent / 100);
+        
+        // targetValue is based on allocationBaseValue (Preset Plan or Current Net Worth)
+        const targetValue = allocationBaseValue * (p.targetPercent / 100);
+        
         const diffValue = targetValue - p.currentValue;
         
         return {
@@ -76,7 +87,9 @@ export async function GET(request: NextRequest) {
         account: {
             id: account.id,
             name: account.name,
+            platform: account.platform,
             cash: account.cash,
+            targetAmount: account.targetAmount,
             totalValue: parseFloat(totalValue.toFixed(2)),
             holdingsValue: parseFloat(holdingsValue.toFixed(2)),
         },

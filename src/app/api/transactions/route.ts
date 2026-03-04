@@ -44,6 +44,8 @@ export async function POST(request: NextRequest) {
             symbol: data.symbol,
             name: manualName,
             type: data.assetType || 'stock',
+            currentPrice: price, // 设置当前价格
+            lastPriceUpdated: new Date(),
           }
         });
         assetId = newAsset.id;
@@ -58,19 +60,13 @@ export async function POST(request: NextRequest) {
        return NextResponse.json({ error: '必须提供 assetId 或 symbol' }, { status: 400 });
     }
 
-    // 2. Fetch Price if missing
-    if ((price == null || price === 0) && shares > 0 && assetSymbol) {
+    // 2. Fetch Price if missing (only if user didn't provide price)
+    if (price == null && shares > 0 && assetSymbol) {
        const fetched = await getPriceBySymbolDate(assetSymbol, date);
        if (fetched != null) {
          price = fetched;
          amount = Math.round(shares * price * 100) / 100;
        }
-    }
-
-    if (price == null || price === 0 || (amount == null || amount === 0) && shares > 0) {
-       // If still no price, try current price from asset if date is today?
-       // For now return error
-       return NextResponse.json({ error: '请填写价格，或确保该资产支持自动获取行情' }, { status: 400 });
     }
     
     // Recalculate amount if undefined but price & shares exist
@@ -78,9 +74,26 @@ export async function POST(request: NextRequest) {
         amount = Math.round(shares * price * 100) / 100;
     }
 
+    if (price == null || (amount == null || amount === 0) && shares > 0) {
+       // If still no price, try current price from asset if date is today?
+       // For now return error
+       return NextResponse.json({ error: '请填写价格，或确保该资产支持自动获取行情' }, { status: 400 });
+    }
+
     // 3. Execute Transaction & Update State (Account Cash + Holding)
     const result = await prisma.$transaction(async (tx) => {
-      // A. Create Transaction Record
+      // A. Update Asset Price (每次交易时更新资产的当前价格)
+      if (price != null && price > 0) {
+        await tx.asset.update({
+          where: { id: assetId },
+          data: { 
+            currentPrice: price, 
+            lastPriceUpdated: new Date() 
+          }
+        });
+      }
+
+      // B. Create Transaction Record
       const transaction = await tx.transaction.create({
         data: {
           accountId: data.accountId,
@@ -94,14 +107,14 @@ export async function POST(request: NextRequest) {
         include: { asset: true, account: true },
       });
 
-      // B. Update Account Cash
+      // C. Update Account Cash
       const cashChange = type === 'buy' ? -amount : amount;
       await tx.account.update({
         where: { id: data.accountId },
         data: { cash: { increment: cashChange } },
       });
 
-      // C. Update Holding
+      // D. Update Holding
       const existingHolding = await tx.holding.findUnique({
         where: { accountId_assetId: { accountId: data.accountId, assetId: assetId } },
       });
