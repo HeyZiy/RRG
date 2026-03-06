@@ -861,7 +861,7 @@ export default function Home() {
             <DialogHeader>
                 <DialogTitle>{newTx.type === 'buy' ? '买入资产' : '卖出资产'}</DialogTitle>
                 <DialogDescription>
-                    输入代码如果是新资产，系统会自动创建。价格留空通过接口获取。
+                    可从现有持仓选择，或输入新资产代码。价格留空通过接口获取。
                 </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -877,7 +877,7 @@ export default function Home() {
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                     <Label className="text-right">账户</Label>
-                    <Select value={newTx.accountId ? newTx.accountId.toString() : ''} onValueChange={v => setNewTx({...newTx, accountId: parseInt(v)})}>
+                    <Select value={newTx.accountId ? newTx.accountId.toString() : ''} onValueChange={v => setNewTx({...newTx, accountId: parseInt(v), symbol: ''})}>
                          <SelectTrigger className="col-span-3"><SelectValue placeholder="选择账户" /></SelectTrigger>
                          <SelectContent>
                              {portfolios.map(p => (
@@ -886,6 +886,27 @@ export default function Home() {
                          </SelectContent>
                      </Select>
                 </div>
+                {/* 现有持仓选择 */}
+                {newTx.accountId > 0 && portfolios.find(p => p.account.id === newTx.accountId)?.positions.length > 0 && (
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">现有持仓</Label>
+                        <Select 
+                            value={newTx.symbol} 
+                            onValueChange={v => setNewTx({...newTx, symbol: v})}
+                        >
+                            <SelectTrigger className="col-span-3">
+                                <SelectValue placeholder="选择持仓资产（可选）" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {portfolios.find(p => p.account.id === newTx.accountId)?.positions.map(pos => (
+                                    <SelectItem key={pos.symbol} value={pos.symbol}>
+                                        {pos.name || pos.symbol} ({pos.symbol}) - 持有 {pos.shares} 股
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
                 <div className="grid grid-cols-4 items-center gap-4">
                     <Label className="text-right">代码 (Symbol)</Label>
                     <Input placeholder="sh600519 / 513100" 
