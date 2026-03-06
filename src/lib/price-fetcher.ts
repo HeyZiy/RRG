@@ -214,11 +214,20 @@ export async function getAssetNameFromEastMoney(symbol: string): Promise<string 
 
 /**
  * 创建或更新资产时从官方数据源获取信息
+ * 优先尝试基金API，再尝试股票API（基金代码与股票代码可能冲突）
  */
 export async function enrichAssetFromEastMoney(symbol: string): Promise<{ name?: string; currentPrice?: number }> {
-    const secid = getSecid(symbol);
-  let fallbackNameFromStock: string | undefined;
+    // Step 1: 优先尝试基金 API（因为 002236 等代码可能既是基金也是股票代码）
+    const fundData = await fetchFundDataFromEastMoney(symbol);
+    if (fundData.name || isReasonablePrice(fundData.latestNav)) {
+      return {
+        name: fundData.name,
+        currentPrice: fundData.latestNav,
+      };
+    }
 
+    // Step 2: 跳过 if 基金 API 成功（有名称或合理价格），否则尝试股票 API
+    const secid = getSecid(symbol);
     if (secid) {
       const url = `http://push2.eastmoney.com/api/qt/stock/get?fields=f58,f57&secid=${secid}`;
 
@@ -229,7 +238,6 @@ export async function enrichAssetFromEastMoney(symbol: string): Promise<{ name?:
             const data = json?.data;
             const stockName = data?.f58 ? String(data.f58) : undefined;
             const stockPrice = data?.f57 ? parseFloat(data.f57) : undefined;
-            fallbackNameFromStock = stockName;
 
             if (isReasonablePrice(stockPrice)) {
               return {
@@ -243,9 +251,9 @@ export async function enrichAssetFromEastMoney(symbol: string): Promise<{ name?:
       }
     }
 
-    const fundData = await fetchFundDataFromEastMoney(symbol);
+    // Step 3: 都失败则返回基金名称（即便没有价格）
     return {
-      name: fundData.name ?? fallbackNameFromStock,
+      name: fundData.name,
       currentPrice: fundData.latestNav,
     };
 }

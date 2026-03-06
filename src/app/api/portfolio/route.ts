@@ -22,18 +22,26 @@ export async function GET(request: NextRequest) {
     let holdingsValue = 0;
     const positions = new Map();
 
-    // Map holdings
+    // Map holdings（包含成本和盈亏计算）
     account.holdings.forEach(h => {
         const price = h.asset.currentPrice || 0;
         const value = h.shares * price;
+        const cost = h.shares * (h.avgCost || 0);
+        const profitLoss = value - cost;
+        const profitLossPercent = cost > 0 ? (profitLoss / cost) * 100 : 0;
+        
         holdingsValue += value;
         positions.set(h.assetId, {
             assetId: h.assetId,
             symbol: h.asset.symbol,
             name: h.asset.name,
             shares: h.shares,
+            avgCost: h.avgCost || 0,
             price: price,
             currentValue: value,
+            cost: cost,
+            profitLoss: parseFloat(profitLoss.toFixed(2)),
+            profitLossPercent: parseFloat(profitLossPercent.toFixed(2)),
             targetPercent: 0, // Default
         });
     });
@@ -46,8 +54,12 @@ export async function GET(request: NextRequest) {
                 symbol: a.asset.symbol,
                 name: a.asset.name,
                 shares: 0,
+                avgCost: 0,
                 price: a.asset.currentPrice || 0,
                 currentValue: 0,
+                cost: 0,
+                profitLoss: 0,
+                profitLossPercent: 0,
                 targetPercent: 0,
              });
         }

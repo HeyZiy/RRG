@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Asset ID is required' }, { status: 400 });
     }
 
-    // Check if asset is used in allocations or transactions
+    // Check if asset is used in allocations - must delete allocations first
     const usage = await prisma.assetAllocation.findFirst({
       where: { assetId: parseInt(id) },
     });
@@ -100,17 +100,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const txUsage = await prisma.transaction.findFirst({
-      where: { assetId: parseInt(id) },
-    });
-
-    if (txUsage) {
-      return NextResponse.json(
-        { error: '无法删除：该资产已有交易记录' },
-        { status: 400 }
-      );
-    }
-
+    // Note: Assets with transactions CAN be deleted. User is responsible for understanding implications.
     await prisma.asset.delete({
       where: { id: parseInt(id) },
     });

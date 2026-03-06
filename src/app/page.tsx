@@ -17,8 +17,12 @@ interface PortfolioPosition {
   symbol: string;
   name: string;
   shares: number;
+  avgCost?: number;
   price: number;
   currentValue: number;      // shares * price
+  cost?: number;             // shares * avgCost
+  profitLoss?: number;       // currentValue - cost
+  profitLossPercent?: number; // (profitLoss / cost) * 100
   currentPercent: number;    // of total portfolio
   targetPercent: number;     // target allocation
   targetValue: number;
@@ -287,7 +291,12 @@ export default function Home() {
   };
 
   const handleDeleteAsset = async (assetId: number) => {
-    if (!confirm('确定要删除该资产吗？')) return;
+    const asset = availableAssets.find(a => a.id === assetId);
+    const warningMsg = asset?.symbol 
+      ? `确定要删除 ${asset.name || asset.symbol}？此操作不可撤销。`
+      : '确定要删除该资产？此操作不可撤销。';
+    
+    if (!confirm(warningMsg)) return;
 
     const res = await fetch(`/api/assets?id=${assetId}`, {
       method: 'DELETE',
@@ -890,6 +899,7 @@ export default function Home() {
                             <TableHead>资产 (代码)</TableHead>
                             <TableHead className="text-right">持仓/价格</TableHead>
                             <TableHead className="text-right">当前市值</TableHead>
+                            <TableHead className="text-right">盈亏</TableHead>
                             <TableHead className="text-right">配置比例 (目标)</TableHead>
                             <TableHead className="text-right">目标偏离 (Drift)</TableHead>
                             <TableHead className="text-right">建议操作</TableHead>
@@ -899,7 +909,7 @@ export default function Home() {
                     <TableBody>
                         {portfolio.positions.length === 0 ? (
                            <TableRow>
-                               <TableCell colSpan={7} className="text-center text-muted-foreground h-24">
+                               <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
                                    暂无持仓，请点击“记一笔”添加交易
                                </TableCell>
                            </TableRow>
@@ -916,6 +926,14 @@ export default function Home() {
                                     </TableCell>
                                     <TableCell className="text-right font-medium">
                                         ¥{pos.currentValue.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className={pos.profitLoss >= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
+                                            ¥{pos.profitLoss?.toLocaleString() || 0}
+                                        </div>
+                                        <div className={`text-xs ${pos.profitLossPercent >= 0 ? "text-red-600" : "text-green-600"}`}>
+                                            {pos.profitLossPercent >= 0 ? "+" : ""}{pos.profitLossPercent?.toFixed(2) || 0}%
+                                        </div>
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex items-center justify-end gap-2">
