@@ -2,6 +2,9 @@
   "name": "asset_allocator",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "next dev",
     "seed": "npx tsx prisma/seed.ts",
