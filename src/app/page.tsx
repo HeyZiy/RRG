@@ -133,6 +133,10 @@ export default function Home() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loadingTransactions, setLoadingTransactions] = useState(false);
     const [selectedAccountForHistory, setSelectedAccountForHistory] = useState<number | null>(null);
+    const [transactionFilterSymbol, setTransactionFilterSymbol] = useState<string>('');
+
+    // Sorting State
+    const [sortConfig, setSortConfig] = useState<{ key: keyof PortfolioPosition | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
     // Init Date on client only to avoid hydration mismatch
     useEffect(() => {
@@ -672,6 +676,7 @@ export default function Home() {
 
     const openTransactionHistory = async (accountId: number) => {
         setSelectedAccountForHistory(accountId);
+        setTransactionFilterSymbol('');
         await fetchTransactions(accountId);
         setIsTransactionHistoryOpen(true);
     };
@@ -702,6 +707,47 @@ export default function Home() {
     };
 
     const totalAssets = portfolios.reduce((sum, p) => sum + p.account.totalValue, 0);
+
+    // Sorting function
+    const handleSort = (key: keyof PortfolioPosition) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const getSortedPositions = (positions: PortfolioPosition[]) => {
+        if (!sortConfig.key) return positions;
+        
+        return [...positions].sort((a, b) => {
+            const aValue = a[sortConfig.key!];
+            const bValue = b[sortConfig.key!];
+            
+            if (aValue === undefined || bValue === undefined) return 0;
+            
+            if (typeof aValue === 'number' && typeof bValue === 'number') {
+                return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+            }
+            
+            if (typeof aValue === 'string' && typeof bValue === 'string') {
+                return sortConfig.direction === 'asc' 
+                    ? aValue.localeCompare(bValue) 
+                    : bValue.localeCompare(aValue);
+            }
+            
+            return 0;
+        });
+    };
+
+    // Filter transactions by symbol
+    const getFilteredTransactions = () => {
+        if (!transactionFilterSymbol) return transactions;
+        return transactions.filter(tx => 
+            tx.asset?.symbol?.toLowerCase().includes(transactionFilterSymbol.toLowerCase()) ||
+            tx.asset?.name?.toLowerCase().includes(transactionFilterSymbol.toLowerCase())
+        );
+    };
 
     return (
         <div className="container mx-auto p-6 space-y-8">
@@ -989,13 +1035,27 @@ export default function Home() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>资产 (代码)</TableHead>
-                                    <TableHead className="text-right">持仓/价格</TableHead>
-                                    <TableHead className="text-right">当前市值</TableHead>
-                                    <TableHead className="text-right">盈亏</TableHead>
-                                    <TableHead className="text-right">配置比例 (目标)</TableHead>
-                                    <TableHead className="text-right">目标偏离 (Drift)</TableHead>
-                                    <TableHead className="text-right">建议操作</TableHead>
+                                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('name')}>
+                                        资产 (代码) {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('shares')}>
+                                        持仓/价格 {sortConfig.key === 'shares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentValue')}>
+                                        当前市值 {sortConfig.key === 'currentValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('profitLoss')}>
+                                        盈亏 {sortConfig.key === 'profitLoss' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentPercent')}>
+                                        配置比例 (目标) {sortConfig.key === 'currentPercent' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('driftValue')}>
+                                        目标偏离 (Drift) {sortConfig.key === 'driftValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
+                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('actionShares')}>
+                                        建议操作 {sortConfig.key === 'actionShares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    </TableHead>
                                     <TableHead className="text-right">动作</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -1003,11 +1063,11 @@ export default function Home() {
                                 {portfolio.positions.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
-                                            暂无持仓，请点击“记一笔”添加交易
+                                            暂无持仓，请点击"记一笔"添加交易
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    portfolio.positions.map((pos) => (
+                                    getSortedPositions(portfolio.positions).map((pos) => (
                                         <TableRow key={pos.assetId}>
                                             <TableCell>
                                                 <div className="font-medium">{pos.name || pos.symbol}</div>
@@ -1507,11 +1567,28 @@ export default function Home() {
                             查看账户的所有交易记录，删除交易会同步更新持仓和现金余额。
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-4">
+                    <div className="py-4 space-y-4">
+                        {/* Filter Input */}
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="筛选股票代码或名称..."
+                                value={transactionFilterSymbol}
+                                onChange={(e) => setTransactionFilterSymbol(e.target.value)}
+                                className="max-w-sm"
+                            />
+                            {transactionFilterSymbol && (
+                                <Button variant="outline" onClick={() => setTransactionFilterSymbol('')}>
+                                    清除筛选
+                                </Button>
+                            )}
+                        </div>
+                        
                         {loadingTransactions ? (
                             <div className="text-center py-8">加载中...</div>
-                        ) : transactions.length === 0 ? (
-                            <div className="text-center py-8 text-muted-foreground">暂无交易记录</div>
+                        ) : getFilteredTransactions().length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                                {transactionFilterSymbol ? '没有找到匹配的交易记录' : '暂无交易记录'}
+                            </div>
                         ) : (
                             <Table>
                                 <TableHeader>
@@ -1526,7 +1603,7 @@ export default function Home() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {transactions.map((tx) => (
+                                    {getFilteredTransactions().map((tx) => (
                                         <TableRow key={tx.id}>
                                             <TableCell>
                                                 {new Date(tx.date).toLocaleDateString('zh-CN')}
