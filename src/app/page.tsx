@@ -1034,7 +1034,8 @@ export default function Home() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="overflow-x-auto">
+                        {/* 桌面端表格 */}
+                        <div className="hidden md:block overflow-x-auto">
                             <Table className="min-w-[800px]">
                                 <TableHeader>
                                     <TableRow>
@@ -1104,14 +1105,12 @@ export default function Home() {
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     {portfolio.account.marketType === 'otc' ? (
-                                                        // 场外基金：显示建议买入/卖出金额
                                                         pos.actionAmount !== 0 && (
                                                             <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionAmount > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                                                                 {pos.actionAmount > 0 ? "买入" : "卖出"} ¥{Math.abs(pos.actionAmount).toLocaleString()}
                                                             </span>
                                                         )
                                                     ) : (
-                                                        // 场内股票/ETF：显示建议买入/卖出股数（按手取整）
                                                         pos.actionShares !== 0 && (
                                                             <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionShares > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                                                                 {pos.actionShares > 0 ? "买入" : "卖出"} {Math.abs(pos.actionShares)} 股
@@ -1133,6 +1132,84 @@ export default function Home() {
                                     )}
                                 </TableBody>
                             </Table>
+                        </div>
+
+                        {/* 手机端卡片视图 */}
+                        <div className="md:hidden space-y-3">
+                            {portfolio.positions.length === 0 ? (
+                                <div className="text-center text-muted-foreground py-8">
+                                    暂无持仓，请点击"记一笔"添加交易
+                                </div>
+                            ) : (
+                                getSortedPositions(portfolio.positions).map((pos) => (
+                                    <div key={pos.assetId} className="bg-muted/30 rounded-lg p-4 space-y-3">
+                                        {/* 资产名称和代码 */}
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="font-medium text-base">{pos.name || pos.symbol}</div>
+                                                <div className="text-xs text-muted-foreground">{pos.symbol}</div>
+                                            </div>
+                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
+                                                onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
+                                                <DollarSign className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+
+                                        {/* 主要数据网格 */}
+                                        <div className="grid grid-cols-2 gap-3 text-sm">
+                                            <div className="bg-background rounded p-2">
+                                                <div className="text-xs text-muted-foreground mb-1">持仓/价格</div>
+                                                <div className="font-medium">{pos.shares} {portfolio.account.marketType === 'otc' ? '份' : '股'}</div>
+                                                <div className="text-xs text-muted-foreground">@ ¥{pos.price}</div>
+                                            </div>
+                                            <div className="bg-background rounded p-2">
+                                                <div className="text-xs text-muted-foreground mb-1">当前市值</div>
+                                                <div className="font-medium">¥{pos.currentValue.toLocaleString()}</div>
+                                            </div>
+                                            <div className="bg-background rounded p-2">
+                                                <div className="text-xs text-muted-foreground mb-1">盈亏</div>
+                                                <div className={(pos.profitLoss || 0) >= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
+                                                    ¥{pos.profitLoss?.toLocaleString() || 0}
+                                                </div>
+                                                <div className={`text-xs ${(pos.profitLossPercent || 0) >= 0 ? "text-red-600" : "text-green-600"}`}>
+                                                    {(pos.profitLossPercent || 0) >= 0 ? "+" : ""}{(pos.profitLossPercent || 0).toFixed(2)}%
+                                                </div>
+                                            </div>
+                                            <div className="bg-background rounded p-2">
+                                                <div className="text-xs text-muted-foreground mb-1">配置比例</div>
+                                                <div className="font-medium">{pos.currentPercent}%</div>
+                                                <div className="text-xs text-muted-foreground">目标: {pos.targetPercent}%</div>
+                                            </div>
+                                        </div>
+
+                                        {/* 目标偏离和建议操作 */}
+                                        <div className="flex justify-between items-center pt-2 border-t">
+                                            <div>
+                                                <span className="text-xs text-muted-foreground">偏离: </span>
+                                                <span className={pos.driftValue < 0 ? "text-red-500 font-bold text-sm" : pos.driftValue > 0 ? "text-green-600 text-sm" : "text-gray-400 text-sm"}>
+                                                    {pos.driftValue.toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                {portfolio.account.marketType === 'otc' ? (
+                                                    pos.actionAmount !== 0 && (
+                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionAmount > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                            {pos.actionAmount > 0 ? "买入" : "卖出"} ¥{Math.abs(pos.actionAmount).toLocaleString()}
+                                                        </span>
+                                                    )
+                                                ) : (
+                                                    pos.actionShares !== 0 && (
+                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionShares > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                            {pos.actionShares > 0 ? "买入" : "卖出"} {Math.abs(pos.actionShares)} 股
+                                                        </span>
+                                                    )
+                                                )}
+                                                {(portfolio.account.marketType === 'otc' ? pos.actionAmount === 0 : pos.actionShares === 0) && <span className="text-gray-400 text-sm">-</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </CardContent>
                     <CardFooter className="bg-muted/50 p-3 flex justify-end gap-2">
