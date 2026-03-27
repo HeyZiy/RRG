@@ -77,6 +77,8 @@ export async function GET(request: NextRequest) {
         : totalValue;
 
     // 2. Calculate Drift & Actions
+    const isOTC = account.marketType === 'otc'; // 判断是否为场外账户
+    
     const items = Array.from(positions.values()).map(p => {
         // currentPercent is always based on actual totalValue (Net Worth) to show reality
         const currentPercent = totalValue > 0 ? (p.currentValue / totalValue) * 100 : 0;
@@ -85,16 +87,32 @@ export async function GET(request: NextRequest) {
         const targetValue = allocationBaseValue * (p.targetPercent / 100);
         
         const diffValue = targetValue - p.currentValue;
-        const rawActionShares = p.price > 0 ? diffValue / p.price : 0;
-        const roundedToLot = Math.round(rawActionShares / 100) * 100;
-        const actionShares = Math.abs(roundedToLot) < 100 ? 0 : roundedToLot;
+        
+        let actionShares = 0;
+        let actionAmount = 0;
+        
+        if (isOTC) {
+            // 场外基金：按金额计算建议，没有手数限制
+            // 建议买入/卖出金额（保留到分）
+            actionAmount = Math.round(diffValue * 100) / 100;
+            // 同时计算份额（用于参考）
+            actionShares = p.price > 0 ? diffValue / p.price : 0;
+        } else {
+            // 场内股票/ETF：按手数（100股）取整
+            const rawActionShares = p.price > 0 ? diffValue / p.price : 0;
+            const roundedToLot = Math.round(rawActionShares / 100) * 100;
+            actionShares = Math.abs(roundedToLot) < 100 ? 0 : roundedToLot;
+            actionAmount = actionShares * p.price;
+        }
         
         return {
             ...p,
             currentPercent: parseFloat(currentPercent.toFixed(2)),
             targetValue: parseFloat(targetValue.toFixed(2)),
             driftValue: parseFloat(diffValue.toFixed(2)), // + means Buy, - means Sell
-            actionShares
+            actionShares: parseFloat(actionShares.toFixed(2)),
+            actionAmount: parseFloat(actionAmount.toFixed(2)),
+            isOTC
         };
     });
 

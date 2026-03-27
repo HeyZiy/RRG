@@ -28,6 +28,8 @@ interface PortfolioPosition {
     targetValue: number;
     driftValue: number;        // difference (positive = need buy)
     actionShares: number;      // suggested buy/sell shares
+    actionAmount: number;      // suggested buy/sell amount (for OTC funds)
+    isOTC?: boolean;           // whether this is an OTC fund
 }
 
 interface PortfolioAccount {
@@ -755,38 +757,38 @@ export default function Home() {
         <div className="container mx-auto p-6 space-y-8">
 
             {/* 1. Header & Dashboard Summary */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex flex-col gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">资产配置仪表盘</h1>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">资产配置仪表盘</h1>
                     <p className="text-muted-foreground mt-1">
-                        当前总资产: <span className="text-2xl font-mono text-primary font-bold" suppressHydrationWarning>¥{totalAssets.toLocaleString()}</span>
+                        当前总资产: <span className="text-xl sm:text-2xl font-mono text-primary font-bold" suppressHydrationWarning>¥{totalAssets.toLocaleString()}</span>
                     </p>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleRefreshPrices} disabled={refreshingPrices}>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={handleRefreshPrices} disabled={refreshingPrices} className="flex-1 min-w-[120px]">
                         <RefreshCw className={`mr-2 h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />
                         {refreshingPrices ? '更新最新行情...' : '刷新市值'}
                     </Button>
-                    <Button variant="outline" onClick={() => setIsAssetManageOpen(true)}>
+                    <Button variant="outline" onClick={() => setIsAssetManageOpen(true)} className="flex-1 min-w-[120px]">
                         📊 资产管理
                     </Button>
                     <Dialog open={isAddAccountOpen} onOpenChange={setIsAddAccountOpen}>
-                        <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> 新建账户</Button></DialogTrigger>
+                        <DialogTrigger asChild><Button className="flex-1 min-w-[120px]"><Plus className="mr-2 h-4 w-4" /> 新建账户</Button></DialogTrigger>
                         <DialogContent>
                             <DialogHeader><DialogTitle>创建新账户</DialogTitle></DialogHeader>
                             <div className="grid gap-4 py-4">
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">名称</Label>
-                                    <Input value={newAccount.name} onChange={e => setNewAccount({ ...newAccount, name: e.target.value })} className="col-span-3" />
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>名称</Label>
+                                    <Input value={newAccount.name} onChange={e => setNewAccount({ ...newAccount, name: e.target.value })} />
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">平台</Label>
-                                    <Input value={newAccount.platform} onChange={e => setNewAccount({ ...newAccount, platform: e.target.value })} className="col-span-3" placeholder="例如: 华泰证券" />
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>平台</Label>
+                                    <Input value={newAccount.platform} onChange={e => setNewAccount({ ...newAccount, platform: e.target.value })} placeholder="例如: 华泰证券" />
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">市场类型</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>市场类型</Label>
                                     <Select value={newAccount.marketType} onValueChange={val => setNewAccount({ ...newAccount, marketType: val })}>
-                                        <SelectTrigger className="col-span-3">
+                                        <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -804,18 +806,18 @@ export default function Home() {
                         <DialogContent>
                             <DialogHeader><DialogTitle>编辑账户</DialogTitle></DialogHeader>
                             <div className="grid gap-4 py-4">
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">名称</Label>
-                                    <Input value={editAccountData.name} onChange={e => setEditAccountData({ ...editAccountData, name: e.target.value })} className="col-span-3" />
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>名称</Label>
+                                    <Input value={editAccountData.name} onChange={e => setEditAccountData({ ...editAccountData, name: e.target.value })} />
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">平台</Label>
-                                    <Input value={editAccountData.platform} onChange={e => setEditAccountData({ ...editAccountData, platform: e.target.value })} className="col-span-3" />
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>平台</Label>
+                                    <Input value={editAccountData.platform} onChange={e => setEditAccountData({ ...editAccountData, platform: e.target.value })} />
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">市场类型</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>市场类型</Label>
                                     <Select value={editAccountData.marketType} onValueChange={val => setEditAccountData({ ...editAccountData, marketType: val })}>
-                                        <SelectTrigger className="col-span-3">
+                                        <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -824,29 +826,27 @@ export default function Home() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">预设投入(¥)</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>预设投入(¥)</Label>
                                     <Input
                                         type="number"
                                         value={editAccountData.targetAmount}
                                         onChange={e => setEditAccountData({ ...editAccountData, targetAmount: e.target.value })}
-                                        className="col-span-3"
                                         placeholder="留空则按当前净值计算"
                                     />
-                                    <p className="col-span-4 text-xs text-muted-foreground text-right">
+                                    <p className="text-xs text-muted-foreground">
                                         如果设置了预设投入金额，分配比例将基于该金额计算，否则基于当前净值（持仓+现金）计算。
                                     </p>
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">现金余额(¥)</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>现金余额(¥)</Label>
                                     <Input
                                         type="number"
                                         value={editAccountData.cash}
                                         onChange={e => setEditAccountData({ ...editAccountData, cash: e.target.value })}
-                                        className="col-span-3"
                                         placeholder="账户现金余额"
                                     />
-                                    <p className="col-span-4 text-xs text-muted-foreground text-right">
+                                    <p className="text-xs text-muted-foreground">
                                         可以直接修改账户的现金余额，负数表示融资/借贷状态。
                                     </p>
                                 </div>
@@ -898,22 +898,21 @@ export default function Home() {
                             <DialogHeader><DialogTitle>编辑资产</DialogTitle></DialogHeader>
                             {editingAsset && (
                                 <div className="grid gap-4 py-4">
-                                    <div className="grid grid-cols-4 items-center gap-4">
-                                        <Label className="text-right">代码</Label>
-                                        <Input value={editingAsset.symbol} disabled className="col-span-3 bg-gray-100" />
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <Label>代码</Label>
+                                        <Input value={editingAsset.symbol} disabled className="bg-gray-100" />
                                     </div>
-                                    <div className="grid grid-cols-4 items-center gap-4">
-                                        <Label className="text-right">名称</Label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <Label>名称</Label>
                                         <Input
                                             value={editingAssetData.name}
                                             onChange={e => setEditingAssetData({ ...editingAssetData, name: e.target.value })}
-                                            className="col-span-3"
                                         />
                                     </div>
-                                    <div className="grid grid-cols-4 items-center gap-4">
-                                        <Label className="text-right">类型</Label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <Label>类型</Label>
                                         <Select value={editingAssetData.type} onValueChange={val => setEditingAssetData({ ...editingAssetData, type: val })}>
-                                            <SelectTrigger className="col-span-3">
+                                            <SelectTrigger>
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -925,13 +924,12 @@ export default function Home() {
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="grid grid-cols-4 items-center gap-4">
-                                        <Label className="text-right">当前价格</Label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <Label>当前价格</Label>
                                         <Input
                                             type="number"
                                             value={editingAssetData.currentPrice}
                                             onChange={e => setEditingAssetData({ ...editingAssetData, currentPrice: e.target.value })}
-                                            className="col-span-3"
                                             placeholder="0.00"
                                         />
                                     </div>
@@ -950,13 +948,12 @@ export default function Home() {
                                         <p className="text-sm font-medium">账户: {accountForDeposit.name}</p>
                                         <p className="text-sm text-muted-foreground">当前现金: ¥{accountForDeposit.cash.toLocaleString()}</p>
                                     </div>
-                                    <div className="grid grid-cols-4 items-center gap-4">
-                                        <Label className="text-right">转入金额(¥)</Label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <Label>转入金额(¥)</Label>
                                         <Input
                                             type="number"
                                             value={depositAmount}
                                             onChange={e => setDepositAmount(e.target.value)}
-                                            className="col-span-3"
                                             placeholder="0.00"
                                         />
                                     </div>
@@ -983,9 +980,9 @@ export default function Home() {
             {/* 2. Portfolio Cards */}
             {!loading && portfolios.map((portfolio) => (
                 <Card key={portfolio.account.id} className="w-full">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <div>
-                            <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    <CardHeader className="flex flex-col items-start space-y-2 pb-2">
+                        <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <CardTitle className="text-lg sm:text-xl font-bold flex items-center gap-2">
                                 <Wallet className="h-5 w-5 text-gray-500" /> {portfolio.account.name}
                                 {portfolio.account.marketType === 'otc' && (
                                     <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">场外</span>
@@ -994,28 +991,31 @@ export default function Home() {
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
                                 </Button>
                             </CardTitle>
-                            <CardDescription>
-                                {portfolio.account.cash !== 0 && (
-                                    <span className={portfolio.account.cash < 0 ? "text-red-500 font-bold mr-1" : "mr-1"}>
-                                        现金余额: ¥{portfolio.account.cash.toLocaleString()} |
-                                    </span>
-                                )}
-                                持仓市值: ¥{portfolio.account.holdingsValue.toLocaleString()}
-                                {portfolio.account.targetAmount && portfolio.account.targetAmount > 0 && (
-                                    <span className="ml-2 bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">
-                                        计划投入: ¥{portfolio.account.targetAmount.toLocaleString()}
-                                    </span>
-                                )}
-                            </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <div className="text-right">
-                                <div className="text-2xl font-bold">¥{portfolio.account.totalValue.toLocaleString()}</div>
+                            <div className="text-right mt-2 sm:mt-0">
+                                <div className="text-xl sm:text-2xl font-bold">¥{portfolio.account.totalValue.toLocaleString()}</div>
                             </div>
+                        </div>
+                        <CardDescription className="w-full">
+                            <div className="flex flex-wrap gap-2">
+                                {portfolio.account.cash !== 0 && (
+                                    <span className={portfolio.account.cash < 0 ? "text-red-500 font-bold" : ""}>
+                                        现金: ¥{portfolio.account.cash.toLocaleString()}
+                                    </span>
+                                )}
+                                <span>持仓: ¥{portfolio.account.holdingsValue.toLocaleString()}</span>
+                                {portfolio.account.targetAmount && portfolio.account.targetAmount > 0 && (
+                                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">
+                                        计划: ¥{portfolio.account.targetAmount.toLocaleString()}
+                                    </span>
+                                )}
+                            </div>
+                        </CardDescription>
+                        <div className="w-full flex gap-2">
                             <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => openDepositDialog(portfolio.account)}
+                                className="flex-1"
                             >
                                 💰 转入现金
                             </Button>
@@ -1034,94 +1034,106 @@ export default function Home() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('name')}>
-                                        资产 (代码) {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('shares')}>
-                                        持仓/价格 {sortConfig.key === 'shares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentValue')}>
-                                        当前市值 {sortConfig.key === 'currentValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('profitLoss')}>
-                                        盈亏 {sortConfig.key === 'profitLoss' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentPercent')}>
-                                        配置比例 (目标) {sortConfig.key === 'currentPercent' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('driftValue')}>
-                                        目标偏离 (Drift) {sortConfig.key === 'driftValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('actionShares')}>
-                                        建议操作 {sortConfig.key === 'actionShares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                                    </TableHead>
-                                    <TableHead className="text-right">动作</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {portfolio.positions.length === 0 ? (
+                        <div className="overflow-x-auto">
+                            <Table className="min-w-[800px]">
+                                <TableHeader>
                                     <TableRow>
-                                        <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
-                                            暂无持仓，请点击"记一笔"添加交易
-                                        </TableCell>
+                                        <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort('name')}>
+                                            资产 (代码) {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('shares')}>
+                                            持仓/价格 {sortConfig.key === 'shares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentValue')}>
+                                            当前市值 {sortConfig.key === 'currentValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('profitLoss')}>
+                                            盈亏 {sortConfig.key === 'profitLoss' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('currentPercent')}>
+                                            配置比例 (目标) {sortConfig.key === 'currentPercent' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('driftValue')}>
+                                            目标偏离 {sortConfig.key === 'driftValue' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('actionShares')}>
+                                            建议操作 {sortConfig.key === 'actionShares' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="text-right">动作</TableHead>
                                     </TableRow>
-                                ) : (
-                                    getSortedPositions(portfolio.positions).map((pos) => (
-                                        <TableRow key={pos.assetId}>
-                                            <TableCell>
-                                                <div className="font-medium">{pos.name || pos.symbol}</div>
-                                                <div className="text-xs text-muted-foreground">{pos.symbol}</div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <div>{pos.shares} {portfolio.account.marketType === 'otc' ? '份' : '股'}</div>
-                                                <div className="text-xs text-muted-foreground">@ {pos.price}</div>
-                                            </TableCell>
-                                            <TableCell className="text-right font-medium">
-                                                ¥{pos.currentValue.toLocaleString()}
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className={(pos.profitLoss || 0) >= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
-                                                    ¥{pos.profitLoss?.toLocaleString() || 0}
-                                                </div>
-                                                <div className={`text-xs ${(pos.profitLossPercent || 0) >= 0 ? "text-red-600" : "text-green-600"}`}>
-                                                    {(pos.profitLossPercent || 0) >= 0 ? "+" : ""}{(pos.profitLossPercent || 0).toFixed(2)}%
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <span>{pos.currentPercent}%</span>
-                                                    <span className="text-xs text-muted-foreground">/ {pos.targetPercent}%</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <span className={pos.driftValue < 0 ? "text-red-500 font-bold" : pos.driftValue > 0 ? "text-green-600" : "text-gray-400"}>
-                                                    {pos.driftValue.toLocaleString()}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                {pos.actionShares !== 0 && (
-                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionShares > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                        {pos.actionShares > 0 ? "买入" : "卖出"} {Math.abs(pos.actionShares)} {portfolio.account.marketType === 'otc' ? '份' : '股'}
-                                                    </span>
-                                                )}
-                                                {pos.actionShares === 0 && <span className="text-gray-400">-</span>}
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className="flex justify-end gap-1">
-                                                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
-                                                        onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
-                                                        <DollarSign className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
+                                </TableHeader>
+                                <TableBody>
+                                    {portfolio.positions.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
+                                                暂无持仓，请点击"记一笔"添加交易
                                             </TableCell>
                                         </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
+                                    ) : (
+                                        getSortedPositions(portfolio.positions).map((pos) => (
+                                            <TableRow key={pos.assetId}>
+                                                <TableCell>
+                                                    <div className="font-medium">{pos.name || pos.symbol}</div>
+                                                    <div className="text-xs text-muted-foreground">{pos.symbol}</div>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <div>{pos.shares} {portfolio.account.marketType === 'otc' ? '份' : '股'}</div>
+                                                    <div className="text-xs text-muted-foreground">@ {pos.price}</div>
+                                                </TableCell>
+                                                <TableCell className="text-right font-medium">
+                                                    ¥{pos.currentValue.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <div className={(pos.profitLoss || 0) >= 0 ? "text-red-600 font-medium" : "text-green-600 font-medium"}>
+                                                        ¥{pos.profitLoss?.toLocaleString() || 0}
+                                                    </div>
+                                                    <div className={`text-xs ${(pos.profitLossPercent || 0) >= 0 ? "text-red-600" : "text-green-600"}`}>
+                                                        {(pos.profitLossPercent || 0) >= 0 ? "+" : ""}{(pos.profitLossPercent || 0).toFixed(2)}%
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <span>{pos.currentPercent}%</span>
+                                                        <span className="text-xs text-muted-foreground">/ {pos.targetPercent}%</span>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <span className={pos.driftValue < 0 ? "text-red-500 font-bold" : pos.driftValue > 0 ? "text-green-600" : "text-gray-400"}>
+                                                        {pos.driftValue.toLocaleString()}
+                                                    </span>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    {portfolio.account.marketType === 'otc' ? (
+                                                        // 场外基金：显示建议买入/卖出金额
+                                                        pos.actionAmount !== 0 && (
+                                                            <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionAmount > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                {pos.actionAmount > 0 ? "买入" : "卖出"} ¥{Math.abs(pos.actionAmount).toLocaleString()}
+                                                            </span>
+                                                        )
+                                                    ) : (
+                                                        // 场内股票/ETF：显示建议买入/卖出股数（按手取整）
+                                                        pos.actionShares !== 0 && (
+                                                            <span className={`px-2 py-1 rounded text-xs font-bold ${pos.actionShares > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                {pos.actionShares > 0 ? "买入" : "卖出"} {Math.abs(pos.actionShares)} 股
+                                                            </span>
+                                                        )
+                                                    )}
+                                                    {(portfolio.account.marketType === 'otc' ? pos.actionAmount === 0 : pos.actionShares === 0) && <span className="text-gray-400">-</span>}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <div className="flex justify-end gap-1">
+                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
+                                                            onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
+                                                            <DollarSign className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
                     </CardContent>
                     <CardFooter className="bg-muted/50 p-3 flex justify-end gap-2">
                         <Button variant="outline" size="sm" onClick={() => openTransactionHistory(portfolio.account.id)}>
@@ -1146,7 +1158,7 @@ export default function Home() {
 
             {/* Transaction Dialog */}
             <Dialog open={isTxOpen} onOpenChange={setIsTxOpen}>
-                <DialogContent>
+                <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>{newTx.type === 'buy' ? '买入资产' : '卖出资产'}</DialogTitle>
                         <DialogDescription>
@@ -1154,20 +1166,20 @@ export default function Home() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">类型</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>类型</Label>
                             <Select value={newTx.type} onValueChange={v => setNewTx({ ...newTx, type: v })}>
-                                <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="buy">买入 (Buy)</SelectItem>
                                     <SelectItem value="sell">卖出 (Sell)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">账户</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>账户</Label>
                             <Select value={newTx.accountId ? newTx.accountId.toString() : ''} onValueChange={v => setNewTx({ ...newTx, accountId: parseInt(v), symbol: '' })}>
-                                <SelectTrigger className="col-span-3"><SelectValue placeholder="选择账户" /></SelectTrigger>
+                                <SelectTrigger><SelectValue placeholder="选择账户" /></SelectTrigger>
                                 <SelectContent>
                                     {portfolios.map(p => (
                                         <SelectItem key={p.account.id} value={p.account.id.toString()}>{p.account.name}</SelectItem>
@@ -1177,13 +1189,13 @@ export default function Home() {
                         </div>
                         {/* 现有持仓选择 */}
                         {newTx.accountId > 0 && (portfolios.find(p => p.account.id === newTx.accountId)?.positions.length || 0) > 0 && (
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">现有持仓</Label>
+                            <div className="grid grid-cols-1 gap-2">
+                                <Label>现有持仓</Label>
                                 <Select
                                     value={newTx.symbol}
                                     onValueChange={v => setNewTx({ ...newTx, symbol: v })}
                                 >
-                                    <SelectTrigger className="col-span-3">
+                                    <SelectTrigger>
                                         <SelectValue placeholder="选择持仓资产（可选）" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -1199,40 +1211,37 @@ export default function Home() {
                                 </Select>
                             </div>
                         )}
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">代码 (Symbol)</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>代码 (Symbol)</Label>
                             <Input placeholder="sh600519 / 513100"
                                 value={newTx.symbol}
-                                onChange={e => setNewTx({ ...newTx, symbol: e.target.value })}
-                                className="col-span-3" />
+                                onChange={e => setNewTx({ ...newTx, symbol: e.target.value })} />
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>
                                 数量 ({portfolios.find(p => p.account.id === newTx.accountId)?.account.marketType === 'otc' ? '份' : '股'})
                             </Label>
                             <Input type="number"
                                 value={newTx.shares}
-                                onChange={e => setNewTx({ ...newTx, shares: e.target.value })}
-                                className="col-span-3" />
+                                onChange={e => setNewTx({ ...newTx, shares: e.target.value })} />
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">单价 (可选)</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>单价 (可选)</Label>
                             <Input type="number"
                                 placeholder={portfolios.find(p => p.account.id === newTx.accountId)?.account.marketType === 'otc' ? '场外账户需手动输入' : '留空自动获取'}
                                 value={newTx.price}
-                                onChange={e => setNewTx({ ...newTx, price: e.target.value })}
-                                className="col-span-3" />
+                                onChange={e => setNewTx({ ...newTx, price: e.target.value })} />
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">日期</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>日期</Label>
                             <Input type="date"
                                 value={newTx.date}
-                                onChange={e => setNewTx({ ...newTx, date: e.target.value })}
-                                className="col-span-3" />
+                                onChange={e => setNewTx({ ...newTx, date: e.target.value })} />
                         </div>
                     </div>
-                    <DialogFooter>
-                        <Button onClick={handleCreateTransaction} disabled={submittingTx}>
+                    <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0 sm:justify-end">
+                        <Button variant="outline" onClick={() => setIsTxOpen(false)} className="flex-1 sm:flex-initial">取消</Button>
+                        <Button onClick={handleCreateTransaction} disabled={submittingTx} className="flex-1 sm:flex-initial">
                             {submittingTx ? '提交中...' : '提交交易'}
                         </Button>
                     </DialogFooter>
@@ -1292,13 +1301,13 @@ export default function Home() {
                     {/* Add New Allocation */}
                     <div className="grid gap-3 py-3 border-b">
                         <h3 className="font-medium text-sm">添加配置</h3>
-                        <div className="grid grid-cols-4 items-center gap-3">
-                            <Label className="text-right text-xs">资产类型</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label className="text-xs">资产类型</Label>
                             <Select
                                 value={newAllocation.assetType}
                                 onValueChange={v => setNewAllocation({ ...newAllocation, assetType: v, assetId: '', newAssetName: '', newAssetSymbol: '' })}
                             >
-                                <SelectTrigger className="col-span-3 h-8">
+                                <SelectTrigger className="h-8">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1310,9 +1319,9 @@ export default function Home() {
 
                         {/* Existing Asset */}
                         {newAllocation.assetType === 'existing' && (
-                            <div className="grid grid-cols-4 items-center gap-3">
-                                <Label className="text-right text-xs">选择资产</Label>
-                                <div className="col-span-3 flex gap-2">
+                            <div className="grid grid-cols-1 gap-2">
+                                <Label className="text-xs">选择资产</Label>
+                                <div className="flex gap-2">
                                     <Select
                                         value={newAllocation.assetId}
                                         onValueChange={v => setNewAllocation({ ...newAllocation, assetId: v })}
@@ -1348,9 +1357,9 @@ export default function Home() {
                         {/* New Asset */}
                         {newAllocation.assetType === 'new' && (
                             <>
-                                <div className="grid grid-cols-4 items-center gap-3">
-                                    <Label className="text-right text-xs">资产代码</Label>
-                                    <div className="col-span-3 flex gap-2">
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label className="text-xs">资产代码</Label>
+                                    <div className="flex gap-2">
                                         <Input
                                             value={newAllocation.newAssetSymbol}
                                             onChange={e => setNewAllocation({ ...newAllocation, newAssetSymbol: e.target.value })}
@@ -1377,20 +1386,20 @@ export default function Home() {
                                         )}
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-3">
-                                    <Label className="text-right text-xs">资产名称</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label className="text-xs">资产名称</Label>
                                     <Input
                                         value={newAllocation.newAssetName}
                                         onChange={e => setNewAllocation({ ...newAllocation, newAssetName: e.target.value })}
-                                        className="col-span-3 h-8"
+                                        className="h-8"
                                         placeholder="自动填充或手动输入"
                                     />
                                 </div>
                             </>
                         )}
 
-                        <div className="grid grid-cols-4 items-center gap-3">
-                            <Label className="text-right text-xs">目标比例 (%)</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label className="text-xs">目标比例 (%)</Label>
                             <Input
                                 type="number"
                                 step="0.1"
@@ -1398,7 +1407,7 @@ export default function Home() {
                                 max="100"
                                 value={newAllocation.targetPercent}
                                 onChange={e => setNewAllocation({ ...newAllocation, targetPercent: e.target.value })}
-                                className="col-span-3 h-8"
+                                className="h-8"
                                 placeholder="例如: 20"
                             />
                         </div>
@@ -1469,13 +1478,13 @@ export default function Home() {
                         <div className="text-sm text-muted-foreground">
                             账户：{manualHoldingAccount?.name || '-'}
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">资产类型</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>资产类型</Label>
                             <Select
                                 value={manualHolding.assetType}
                                 onValueChange={val => setManualHolding({ ...manualHolding, assetType: val, assetId: '', symbol: '', name: '' })}
                             >
-                                <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="existing">现有资产</SelectItem>
                                     <SelectItem value="new">新资产</SelectItem>
@@ -1484,10 +1493,10 @@ export default function Home() {
                         </div>
 
                         {manualHolding.assetType === 'existing' ? (
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label className="text-right">资产</Label>
+                            <div className="grid grid-cols-1 gap-2">
+                                <Label>资产</Label>
                                 <Select value={manualHolding.assetId} onValueChange={val => setManualHolding({ ...manualHolding, assetId: val })}>
-                                    <SelectTrigger className="col-span-3"><SelectValue placeholder="选择资产" /></SelectTrigger>
+                                    <SelectTrigger><SelectValue placeholder="选择资产" /></SelectTrigger>
                                     <SelectContent>
                                         {availableAssets.map(asset => (
                                             <SelectItem key={asset.id} value={asset.id.toString()}>
@@ -1499,19 +1508,17 @@ export default function Home() {
                             </div>
                         ) : (
                             <>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">代码</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>代码</Label>
                                     <Input
-                                        className="col-span-3"
                                         value={manualHolding.symbol}
                                         onChange={e => setManualHolding({ ...manualHolding, symbol: e.target.value })}
                                         placeholder="例如: 017888"
                                     />
                                 </div>
-                                <div className="grid grid-cols-4 items-center gap-4">
-                                    <Label className="text-right">名称</Label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>名称</Label>
                                     <Input
-                                        className="col-span-3"
                                         value={manualHolding.name}
                                         onChange={e => setManualHolding({ ...manualHolding, name: e.target.value })}
                                         placeholder="可选，默认用代码"
@@ -1520,31 +1527,28 @@ export default function Home() {
                             </>
                         )}
 
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">当前份额</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>当前份额</Label>
                             <Input
                                 type="number"
-                                className="col-span-3"
                                 value={manualHolding.shares}
                                 onChange={e => setManualHolding({ ...manualHolding, shares: e.target.value })}
                                 placeholder="例如: 1234.56"
                             />
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">平均成本</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>平均成本</Label>
                             <Input
                                 type="number"
-                                className="col-span-3"
                                 value={manualHolding.avgCost}
                                 onChange={e => setManualHolding({ ...manualHolding, avgCost: e.target.value })}
                                 placeholder="可选"
                             />
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label className="text-right">当前净值</Label>
+                        <div className="grid grid-cols-1 gap-2">
+                            <Label>当前净值</Label>
                             <Input
                                 type="number"
-                                className="col-span-3"
                                 value={manualHolding.currentPrice}
                                 onChange={e => setManualHolding({ ...manualHolding, currentPrice: e.target.value })}
                                 placeholder="可选，用于更新市值"
