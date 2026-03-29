@@ -37,6 +37,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '账户不存在' }, { status: 400 });
     }
 
+    const isOTC = account.marketType === 'otc';
+
     // 1. Resolve Asset ID (Create if not exists)
     let assetId = data.assetId;
     let assetSymbol = '';
@@ -48,11 +50,13 @@ export async function POST(request: NextRequest) {
         assetSymbol = existing.symbol;
       } else {
         const manualName = data.name || data.symbol;
+        // 根据账户类型确定默认资产类型：场外账户默认为基金，场内账户默认为股票
+        const defaultAssetType = isOTC ? 'fund' : 'stock';
         const newAsset = await prisma.asset.create({
           data: {
             symbol: data.symbol,
             name: manualName,
-            type: data.assetType || 'stock',
+            type: data.assetType || defaultAssetType,
             currentPrice: price, // 设置当前价格
             lastPriceUpdated: new Date(),
           }
