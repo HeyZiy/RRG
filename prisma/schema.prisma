@@ -41,6 +41,7 @@ model Asset {
   name         String   @default("") // 允许默认为空，后续更新
   symbol       String   @unique
   type         String   @default("stock")
+  category     String?  // 资产大类，如 "沪深300", "中证500", "债券", "货币"
   currentPrice Float?
   lastPriceUpdated DateTime? // 行情更新时间
   createdAt    DateTime @default(now())
@@ -89,4 +90,13 @@ model Transaction {
   createdAt DateTime @default(now())
   account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model GlobalCategoryTarget {
+  id           Int      @id @default(autoincrement())
+  category     String   @unique // 大类名称，与 Asset.category 对应
+  targetAmount Float    @default(0) // 目标持仓金额（¥）
+  note         String?  // 备注
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

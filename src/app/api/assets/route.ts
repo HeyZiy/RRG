@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const data = await request.json();
-    const { id, name, type, currentPrice } = data;
+    const { id, name, type, currentPrice, category } = data;
     
     if (!id) {
       return NextResponse.json({ error: 'Asset ID is required' }, { status: 400 });
@@ -69,6 +69,7 @@ export async function PUT(request: NextRequest) {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
         ...(currentPrice !== undefined && { currentPrice }),
+        ...(category !== undefined && { category: category === '' ? null : category }),
       },
     });
 

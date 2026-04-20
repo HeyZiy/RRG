@@ -2,14 +2,17 @@
   "name": "asset_allocator",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
     "dev": "next dev",
+    "electron:dev": "electron .",
     "seed": "npx tsx prisma/seed.ts",
     "sync:assets": "npx tsx scripts/sync-asset-metadata.ts",
     "build": "npx prisma generate && npx prisma migrate deploy && next build",
+    "electron:builder": "electron-builder",
     "start": "next start",
     "lint": "eslint"
   },
@@ -34,6 +37,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.2.1",
+    "electron-builder": "^26.8.1",
+    "electron-is-dev": "^3.0.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "prisma": "^6.4.1",

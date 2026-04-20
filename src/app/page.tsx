@@ -69,6 +69,38 @@ interface Transaction {
     };
 }
 
+// --- Summary Interfaces ---
+
+interface SummaryAsset {
+    assetId: number;
+    symbol: string;
+    name: string;
+    accountId: number;
+    accountName: string;
+    shares: number;
+    price: number;
+    value: number;
+}
+
+interface SummaryCategory {
+    category: string;
+    currentValue: number;
+    targetAmount: number;
+    targetId: number | null;
+    note: string | null;
+    diff: number;
+    assets: SummaryAsset[];
+}
+
+interface SummaryResponse {
+    totalValue: number;
+    categories: SummaryCategory[];
+    uncategorized: {
+        currentValue: number;
+        assets: SummaryAsset[];
+    };
+}
+
 // --- Main Component ---
 
 export default function Home() {
@@ -110,7 +142,7 @@ export default function Home() {
     const [availableAssets, setAvailableAssets] = useState<any[]>([]);
     const [newAccount, setNewAccount] = useState({ name: '', platform: '', marketType: 'exchange', cash: '0' });
     const [editAccountData, setEditAccountData] = useState({ name: '', platform: '', marketType: 'exchange', targetAmount: '', cash: '' });
-    const [editingAssetData, setEditingAssetData] = useState({ name: '', type: '', currentPrice: '' });
+    const [editingAssetData, setEditingAssetData] = useState({ name: '', type: '', currentPrice: '', category: '' });
     const [depositAmount, setDepositAmount] = useState('');
     const [manualHoldingAccount, setManualHoldingAccount] = useState<PortfolioAccount | null>(null);
     const [manualHolding, setManualHolding] = useState({
@@ -139,6 +171,12 @@ export default function Home() {
 
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: keyof PortfolioPosition | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
+
+    // Global Summary State
+    const [summary, setSummary] = useState<SummaryResponse | null>(null);
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+    const [editingTarget, setEditingTarget] = useState<{ category: string; value: string } | null>(null);
 
     // Init Date on client only to avoid hydration mismatch
     useEffect(() => {
@@ -183,21 +221,59 @@ export default function Home() {
         }
     };
 
+    const fetchSummary = async () => {
+        setSummaryLoading(true);
+        try {
+            const res = await fetch('/api/summary');
+            if (res.ok) {
+                const data = await res.json();
+                setSummary(data);
+            }
+        } catch (e) {
+            console.error('Failed to fetch summary', e);
+        } finally {
+            setSummaryLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchAllPortfolios();
         fetchAvailableAssets();
+        fetchSummary();
     }, []);
 
     const handleRefreshPrices = async () => {
         setRefreshingPrices(true);
         try {
             await fetch('/api/prices/refresh', { method: 'POST' });
-            await fetchAllPortfolios(); // Reload data after price update
+            await fetchAllPortfolios();
+            await fetchSummary();
         } catch (e) {
             alert('行情更新失败');
         } finally {
             setRefreshingPrices(false);
         }
+    };
+
+    const toggleCategoryExpand = (cat: string) => {
+        setExpandedCategories(prev => {
+            const next = new Set(prev);
+            if (next.has(cat)) next.delete(cat);
+            else next.add(cat);
+            return next;
+        });
+    };
+
+    const handleSaveTarget = async (category: string, amount: string) => {
+        const val = parseFloat(amount);
+        if (isNaN(val) || val < 0) return alert('请输入有效的目标金额');
+        await fetch('/api/summary/targets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, targetAmount: val }),
+        });
+        setEditingTarget(null);
+        await fetchSummary();
     };
 
     // --- Actions ---
@@ -317,14 +393,16 @@ export default function Home() {
                 name: editingAssetData.name,
                 type: editingAssetData.type,
                 currentPrice: editingAssetData.currentPrice ? parseFloat(editingAssetData.currentPrice) : undefined,
+                category: editingAssetData.category,
             }),
         });
 
         if (res.ok) {
             setIsEditAssetOpen(false);
             setEditingAsset(null);
-            setEditingAssetData({ name: '', type: '', currentPrice: '' });
+            setEditingAssetData({ name: '', type: '', currentPrice: '', category: '' });
             await fetchAvailableAssets();
+            await fetchSummary();
         } else {
             const err = await res.json();
             alert(err.error || '资产更新失败');
@@ -358,6 +436,7 @@ export default function Home() {
             name: asset.name || '',
             type: asset.type || 'stock',
             currentPrice: asset.currentPrice ? asset.currentPrice.toString() : '',
+            category: asset.category || '',
         });
         setIsEditAssetOpen(true);
     };
@@ -772,6 +851,9 @@ export default function Home() {
                     <Button variant="outline" onClick={() => setIsAssetManageOpen(true)} className="flex-1 min-w-[120px]">
                         📊 资产管理
                     </Button>
+                    <Button variant="outline" onClick={() => window.location.href='/settings'} className="flex-1 min-w-[120px]">
+                        ⚙️ 系统设置
+                    </Button>
                     <Dialog open={isAddAccountOpen} onOpenChange={setIsAddAccountOpen}>
                         <DialogTrigger asChild><Button className="flex-1 min-w-[120px]"><Plus className="mr-2 h-4 w-4" /> 新建账户</Button></DialogTrigger>
                         <DialogContent>
@@ -910,6 +992,15 @@ export default function Home() {
                                         />
                                     </div>
                                     <div className="grid grid-cols-1 gap-2">
+                                        <Label>资产大类</Label>
+                                        <Input
+                                            value={editingAssetData.category}
+                                            onChange={e => setEditingAssetData({ ...editingAssetData, category: e.target.value })}
+                                            placeholder="如：沪深300、中证500、债券、货币"
+                                        />
+                                        <p className="text-xs text-muted-foreground">用于全局汇总分组，留空则归为「未分类」</p>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2">
                                         <Label>类型</Label>
                                         <Select value={editingAssetData.type} onValueChange={val => setEditingAssetData({ ...editingAssetData, type: val })}>
                                             <SelectTrigger>
@@ -977,7 +1068,201 @@ export default function Home() {
 
             {loading && <div className="text-center py-10">加载数据中...</div>}
 
-            {/* 2. Portfolio Cards */}
+            {/* 2. Global Summary Panel */}
+            {!loading && (
+                <Card className="w-full">
+                    <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg font-bold flex items-center gap-2">
+                                <TrendingUp className="h-5 w-5 text-blue-500" />
+                                全局资产汇总
+                            </CardTitle>
+                            <Button variant="ghost" size="sm" onClick={fetchSummary} disabled={summaryLoading}>
+                                <RefreshCw className={`h-4 w-4 ${summaryLoading ? 'animate-spin' : ''}`} />
+                            </Button>
+                        </div>
+                        {summary && (
+                            <p className="text-sm text-muted-foreground">
+                                持仓总市值：<span className="font-mono font-bold text-foreground">¥{summary.totalValue.toLocaleString()}</span>
+                            </p>
+                        )}
+                    </CardHeader>
+                    <CardContent>
+                        {summaryLoading && !summary && (
+                            <div className="text-center py-6 text-muted-foreground text-sm">加载汇总中...</div>
+                        )}
+                        {summary && (
+                            <div className="space-y-3">
+                                {/* 总览比例条 */}
+                                {summary.categories.length > 0 && (
+                                    <div className="space-y-1.5">
+                                        <div className="flex h-4 w-full overflow-hidden rounded-full bg-muted gap-0.5">
+                                            {summary.categories.map((cat, i) => {
+                                                const pct = summary.totalValue > 0 ? (cat.currentValue / summary.totalValue) * 100 : 0;
+                                                const colors = ['bg-blue-500','bg-emerald-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-cyan-500','bg-orange-500','bg-teal-500'];
+                                                if (pct < 0.5) return null;
+                                                return (
+                                                    <div
+                                                        key={cat.category}
+                                                        className={`${colors[i % colors.length]} transition-all`}
+                                                        style={{ width: `${pct}%` }}
+                                                        title={`${cat.category}: ¥${cat.currentValue.toLocaleString()} (${pct.toFixed(1)}%)`}
+                                                    />
+                                                );
+                                            })}
+                                            {summary.uncategorized.currentValue > 0 && (
+                                                <div
+                                                    className="bg-gray-300"
+                                                    style={{ width: `${summary.totalValue > 0 ? (summary.uncategorized.currentValue / summary.totalValue) * 100 : 0}%` }}
+                                                    title={`未分类: ¥${summary.uncategorized.currentValue.toLocaleString()}`}
+                                                />
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-3">
+                                            {summary.categories.map((cat, i) => {
+                                                const colors = ['bg-blue-500','bg-emerald-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-cyan-500','bg-orange-500','bg-teal-500'];
+                                                return (
+                                                    <div key={cat.category} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                        <div className={`w-2.5 h-2.5 rounded-full ${colors[i % colors.length]}`} />
+                                                        {cat.category}
+                                                    </div>
+                                                );
+                                            })}
+                                            {summary.uncategorized.currentValue > 0 && (
+                                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                    <div className="w-2.5 h-2.5 rounded-full bg-gray-300" />
+                                                    未分类
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 大类明细表 */}
+                                <div className="divide-y">
+                                    {summary.categories.map(cat => {
+                                        const hasTarget = cat.targetAmount > 0;
+                                        const isExpanded = expandedCategories.has(cat.category);
+                                        const isEditingThis = editingTarget?.category === cat.category;
+                                        const totalPct = summary.totalValue > 0 ? (cat.currentValue / summary.totalValue * 100) : 0;
+                                        const targetPct = summary.totalValue > 0 && hasTarget ? (cat.targetAmount / summary.totalValue * 100) : null;
+
+                                        return (
+                                            <div key={cat.category}>
+                                                <div
+                                                    className="flex items-center justify-between py-3 cursor-pointer hover:bg-muted/40 px-1 rounded transition-colors"
+                                                    onClick={() => toggleCategoryExpand(cat.category)}
+                                                >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <span className="text-sm font-medium truncate">{cat.category}</span>
+                                                        <span className="text-xs text-muted-foreground shrink-0">{totalPct.toFixed(1)}%</span>
+                                                        {hasTarget && (
+                                                            <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${
+                                                                cat.diff > 0 ? 'bg-green-100 text-green-700' :
+                                                                cat.diff < 0 ? 'bg-red-100 text-red-700' :
+                                                                'bg-gray-100 text-gray-500'
+                                                            }`}>
+                                                                {cat.diff > 0 ? '+' : ''}{cat.diff.toLocaleString()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0">
+                                                        <div className="text-right">
+                                                            <div className="text-sm font-mono font-medium">¥{cat.currentValue.toLocaleString()}</div>
+                                                            {hasTarget && (
+                                                                <div className="text-xs text-muted-foreground">目标 ¥{cat.targetAmount.toLocaleString()}{targetPct !== null && ` (${targetPct.toFixed(1)}%)`}</div>
+                                                            )}
+                                                        </div>
+                                                        {/* 目标编辑按钮 */}
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-xs text-muted-foreground"
+                                                            onClick={e => {
+                                                                e.stopPropagation();
+                                                                setEditingTarget({ category: cat.category, value: cat.targetAmount > 0 ? cat.targetAmount.toString() : '' });
+                                                            }}
+                                                        >
+                                                            {hasTarget ? '改目标' : '设目标'}
+                                                        </Button>
+                                                        <span className="text-muted-foreground text-xs">{isExpanded ? '▲' : '▼'}</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* 目标金额编辑行 */}
+                                                {isEditingThis && (
+                                                    <div className="flex items-center gap-2 pb-2 px-1" onClick={e => e.stopPropagation()}>
+                                                        <span className="text-xs text-muted-foreground shrink-0">{cat.category} 目标金额 ¥</span>
+                                                        <Input
+                                                            type="number"
+                                                            className="h-7 text-xs w-32"
+                                                            value={editingTarget!.value}
+                                                            onChange={e => setEditingTarget({ ...editingTarget!, value: e.target.value })}
+                                                            placeholder="0"
+                                                            autoFocus
+                                                        />
+                                                        <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveTarget(cat.category, editingTarget!.value)}>保存</Button>
+                                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingTarget(null)}>取消</Button>
+                                                    </div>
+                                                )}
+
+                                                {/* 展开：资产明细 */}
+                                                {isExpanded && (
+                                                    <div className="pb-2 pl-2 space-y-1">
+                                                        {cat.assets.map(a => (
+                                                            <div key={`${a.assetId}-${a.accountId}`} className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3">
+                                                                <span className="truncate">{a.name || a.symbol} <span className="opacity-60">({a.accountName})</span></span>
+                                                                <span className="font-mono shrink-0 ml-2">¥{a.value.toLocaleString()}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+
+                                    {/* 未分类 */}
+                                    {summary.uncategorized.currentValue > 0 && (
+                                        <div>
+                                            <div
+                                                className="flex items-center justify-between py-3 cursor-pointer hover:bg-muted/40 px-1 rounded transition-colors"
+                                                onClick={() => toggleCategoryExpand('__uncategorized__')}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-muted-foreground">未分类</span>
+                                                    <span className="text-xs text-muted-foreground">点击资产管理→编辑资产→设置大类</span>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-sm font-mono">¥{summary.uncategorized.currentValue.toLocaleString()}</span>
+                                                    <span className="text-muted-foreground text-xs">{expandedCategories.has('__uncategorized__') ? '▲' : '▼'}</span>
+                                                </div>
+                                            </div>
+                                            {expandedCategories.has('__uncategorized__') && (
+                                                <div className="pb-2 pl-2 space-y-1">
+                                                    {summary.uncategorized.assets.map(a => (
+                                                        <div key={`${a.assetId}-${a.accountId}`} className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3">
+                                                            <span className="truncate">{a.name || a.symbol} <span className="opacity-60">({a.accountName})</span></span>
+                                                            <span className="font-mono shrink-0 ml-2">¥{a.value.toLocaleString()}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {summary.categories.length === 0 && summary.uncategorized.currentValue === 0 && (
+                                        <div className="text-center py-6 text-muted-foreground text-sm">
+                                            暂无持仓数据。请先录入持仓，然后在「资产管理」中为资产设置大类。
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* 3. Portfolio Cards */}
             {!loading && portfolios.map((portfolio) => (
                 <Card key={portfolio.account.id} className="w-full">
                     <CardHeader className="flex flex-col items-start space-y-2 pb-2">
@@ -1067,7 +1352,7 @@ export default function Home() {
                                     {portfolio.positions.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
-                                                暂无持仓，请点击"记一笔"添加交易
+                                暂无持仓，请点击&ldquo;记一笔&rdquo;添加交易
                                             </TableCell>
                                         </TableRow>
                                     ) : (
@@ -1138,7 +1423,7 @@ export default function Home() {
                         <div className="md:hidden space-y-3">
                             {portfolio.positions.length === 0 ? (
                                 <div className="text-center text-muted-foreground py-8">
-                                    暂无持仓，请点击"记一笔"添加交易
+                                    暂无持仓，请点击&ldquo;记一笔&rdquo;添加交易
                                 </div>
                             ) : (
                                 getSortedPositions(portfolio.positions).map((pos) => (
