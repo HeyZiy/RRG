@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const http = require('http');
 const { createServer } = require('http');
-const { parse } = require('url');
 const next = require('next');
 const fs = require('fs');
 
@@ -10,17 +10,45 @@ const hostname = 'localhost';
 // find a random port or fallback to 3000
 const port = 3000; 
 
-const nextApp = next({ dev, hostname, port, dir: path.join(__dirname, '..') });
-const handle = nextApp.getRequestHandler();
+const projectDir = path.resolve(__dirname, '..');
+// Keep module resolution stable for Next.js when launched by Electron.
+process.chdir(projectDir);
 
 let mainWindow;
 
+async function waitForServerReady(url, retries = 40, intervalMs = 500) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const isReady = await new Promise((resolve) => {
+      const req = http.get(url, (res) => {
+        res.resume();
+        resolve(res.statusCode && res.statusCode < 500);
+      });
+
+      req.on('error', () => resolve(false));
+      req.setTimeout(1500, () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+
+    if (isReady) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`External Next dev server not ready at ${url}`);
+}
+
 async function startNextServer() {
+  const nextApp = next({ dev, hostname, port, dir: projectDir });
+  const handle = nextApp.getRequestHandler();
+
   await nextApp.prepare();
   createServer(async (req, res) => {
     try {
-      const parsedUrl = parse(req.url, true);
-      await handle(req, res, parsedUrl);
+      await handle(req, res);
     } catch (err) {
       console.error('Error occurred handling', req.url, err);
       res.statusCode = 500;
@@ -120,7 +148,11 @@ app.whenReady().then(async () => {
     }
   }
 
-  await startNextServer();
+  if (dev && process.env.NEXT_EXTERNAL_SERVER === '1') {
+    await waitForServerReady(`http://${hostname}:${port}`);
+  } else {
+    await startNextServer();
+  }
   createWindow();
 
   app.on('activate', function () {

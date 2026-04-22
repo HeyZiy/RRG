@@ -43,3 +43,4 @@ src/generated/
 # Prisma Seed
 prisma/seed.ts
 prisma/seed.js
+.trae/rules/git-commit-message.md

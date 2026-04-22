@@ -69,6 +69,18 @@ interface Transaction {
     };
 }
 
+interface AllocationItem {
+    id: number;
+    accountId: number;
+    assetId: number;
+    targetPercent: number;
+    asset: {
+        id: number;
+        symbol: string;
+        name: string;
+    };
+}
+
 // --- Summary Interfaces ---
 
 interface SummaryAsset {
@@ -121,6 +133,7 @@ export default function Home() {
     const [isDepositCashOpen, setIsDepositCashOpen] = useState(false);
     const [isManualHoldingOpen, setIsManualHoldingOpen] = useState(false);
     const [isTransactionHistoryOpen, setIsTransactionHistoryOpen] = useState(false);
+    const [isQuickCategoryOpen, setIsQuickCategoryOpen] = useState(false);
 
     // Selection Context
     const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
@@ -129,9 +142,11 @@ export default function Home() {
     const [accountToEdit, setAccountToEdit] = useState<PortfolioAccount | null>(null);
     const [accountForDeposit, setAccountForDeposit] = useState<PortfolioAccount | null>(null);
     const [editingAsset, setEditingAsset] = useState<any | null>(null);
+    const [quickCategoryAssetId, setQuickCategoryAssetId] = useState<number | null>(null);
+    const [quickCategoryValue, setQuickCategoryValue] = useState('');
 
     // Forms Data
-    const [allocations, setAllocations] = useState<any[]>([]);
+    const [allocations, setAllocations] = useState<AllocationItem[]>([]);
     const [newAllocation, setNewAllocation] = useState({
         assetType: 'existing', // 'existing' or 'new'
         assetId: '',
@@ -185,8 +200,8 @@ export default function Home() {
 
     // --- Data Fetching ---
 
-    const fetchAllPortfolios = async () => {
-        setLoading(true);
+    const fetchAllPortfolios = async (showLoading = false) => {
+        if (showLoading) setLoading(true);
         try {
             // 1. Get List of Accounts
             const accRes = await fetch('/api/accounts');
@@ -217,7 +232,7 @@ export default function Home() {
             console.error('Failed to load data', error);
             setPortfolios([]);
         } finally {
-            setLoading(false);
+            if (showLoading) setLoading(false);
         }
     };
 
@@ -264,13 +279,16 @@ export default function Home() {
         });
     };
 
-    const handleSaveTarget = async (category: string, amount: string) => {
-        const val = parseFloat(amount);
-        if (isNaN(val) || val < 0) return alert('请输入有效的目标金额');
+    const handleSaveTarget = async (category: string, percent: string) => {
+        const val = parseFloat(percent);
+        if (isNaN(val) || val < 0 || val > 100) return alert('请输入有效的目标占比（0-100）');
+        if (!summary || summary.totalValue <= 0) return alert('当前总市值为 0，暂时无法设置目标占比');
+
+        const targetAmount = (val / 100) * summary.totalValue;
         await fetch('/api/summary/targets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, targetAmount: val }),
+            body: JSON.stringify({ category, targetAmount }),
         });
         setEditingTarget(null);
         await fetchSummary();
@@ -441,15 +459,73 @@ export default function Home() {
         setIsEditAssetOpen(true);
     };
 
+    const openQuickCategoryDialog = (assetId: number) => {
+        const asset = availableAssets.find(a => a.id === assetId);
+        if (!asset) return;
+        setQuickCategoryAssetId(asset.id);
+        setQuickCategoryValue(asset.category || '');
+        setIsQuickCategoryOpen(true);
+    };
+
+    const handleSaveQuickCategory = async () => {
+        if (!quickCategoryAssetId) return;
+        const asset = availableAssets.find(a => a.id === quickCategoryAssetId);
+        if (!asset) return;
+
+        const res = await fetch('/api/assets', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: asset.id,
+                name: asset.name,
+                type: asset.type,
+                currentPrice: asset.currentPrice,
+                category: quickCategoryValue,
+            }),
+        });
+
+        if (res.ok) {
+            setIsQuickCategoryOpen(false);
+            setQuickCategoryAssetId(null);
+            setQuickCategoryValue('');
+            await fetchAvailableAssets();
+            await fetchSummary();
+            await fetchAllPortfolios();
+        } else {
+            const err = await res.json();
+            alert(err.error || '分类更新失败');
+        }
+    };
+
     // --- Asset Allocation Functions ---  
+
+    const normalizeAllocations = (data: unknown): AllocationItem[] => {
+        if (!Array.isArray(data)) {
+            return [];
+        }
+
+        const map = new Map<number, AllocationItem>();
+        data.forEach((item) => {
+            const row = item as AllocationItem;
+            if (typeof row?.assetId !== 'number') {
+                return;
+            }
+            if (!map.has(row.assetId)) {
+                map.set(row.assetId, row);
+            }
+        });
+
+        return Array.from(map.values());
+    };
 
     const fetchAllocations = async (accountId: number) => {
         try {
             const res = await fetch(`/api/allocations?accountId=${accountId}`);
             const data = await res.json();
-            setAllocations(data);
+            setAllocations(normalizeAllocations(data));
         } catch (error) {
             console.error('Failed to fetch allocations', error);
+            setAllocations([]);
         }
     };
 
@@ -463,16 +539,50 @@ export default function Home() {
         }
     };
 
+    const handleUpsertAllocationTarget = async (accountId: number, assetId: number, targetPercent: number) => {
+        const currentTotal = allocations.reduce((sum, alloc) => {
+            if (alloc.accountId !== accountId || alloc.assetId === assetId) {
+                return sum;
+            }
+            return sum + alloc.targetPercent;
+        }, 0);
+
+        if (currentTotal + targetPercent > 100) {
+            alert('配置比例总和不能超过100%');
+            return false;
+        }
+
+        const res = await fetch('/api/allocations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                accountId,
+                assetId,
+                targetPercent,
+            }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.error || '保存配置失败');
+            return false;
+        }
+
+        if (accountForAllocation === accountId) {
+            await fetchAllocations(accountId);
+        }
+        fetchAllPortfolios(false);
+        return true;
+    };
+
     const handleAddAllocation = async () => {
         if (!accountForAllocation || !newAllocation.targetPercent) {
             return alert('请填写完整的配置信息');
         }
 
         const newPercent = parseFloat(newAllocation.targetPercent);
-        const currentTotal = allocations.reduce((sum, alloc) => sum + alloc.targetPercent, 0);
-
-        if (currentTotal + newPercent > 100) {
-            return alert('配置比例总和不能超过100%');
+        if (Number.isNaN(newPercent) || newPercent < 0 || newPercent > 100) {
+            return alert('目标比例必须在 0 到 100 之间');
         }
 
         let assetId: number;
@@ -509,18 +619,9 @@ export default function Home() {
             assetId = parseInt(newAllocation.assetId);
         }
 
-        // Create allocation
-        const res = await fetch('/api/allocations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                accountId: accountForAllocation,
-                assetId: assetId,
-                targetPercent: newPercent,
-            }),
-        });
+        const saved = await handleUpsertAllocationTarget(accountForAllocation, assetId, newPercent);
 
-        if (res.ok) {
+        if (saved) {
             setNewAllocation({
                 assetType: 'existing',
                 assetId: '',
@@ -528,12 +629,7 @@ export default function Home() {
                 newAssetName: '',
                 newAssetSymbol: ''
             });
-            await fetchAllocations(accountForAllocation);
             await fetchAvailableAssets(); // Refresh asset list
-            fetchAllPortfolios();
-        } else {
-            const err = await res.json();
-            alert(err.error || '添加配置失败');
         }
     };
 
@@ -554,7 +650,7 @@ export default function Home() {
 
         if (res.ok) {
             await fetchAllocations(accountForAllocation!);
-            fetchAllPortfolios();
+            fetchAllPortfolios(false); // 不显示加载状态
         } else {
             const err = await res.json();
             alert(err.error || '更新配置失败');
@@ -569,7 +665,7 @@ export default function Home() {
 
             if (res.ok) {
                 await fetchAllocations(accountForAllocation!);
-                fetchAllPortfolios();
+                fetchAllPortfolios(false); // 不显示加载状态
             } else {
                 const err = await res.json();
                 alert(err.error || '删除配置失败');
@@ -1062,6 +1158,55 @@ export default function Home() {
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
+
+                    <Dialog open={isQuickCategoryOpen} onOpenChange={setIsQuickCategoryOpen}>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>设置所属大类</DialogTitle>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid grid-cols-1 gap-2">
+                                    <Label>选择或输入大类名称</Label>
+                                    <Input
+                                        value={quickCategoryValue}
+                                        onChange={e => setQuickCategoryValue(e.target.value)}
+                                        placeholder="如：沪深300、大盘价值"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') handleSaveQuickCategory();
+                                        }}
+                                    />
+                                    {summary && summary.categories.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            {summary.categories.map(c => (
+                                                <Button
+                                                    key={c.category}
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-7 text-xs"
+                                                    onClick={() => setQuickCategoryValue(c.category)}
+                                                >
+                                                    {c.category}
+                                                </Button>
+                                            ))}
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 text-xs text-muted-foreground"
+                                                onClick={() => setQuickCategoryValue('')}
+                                            >
+                                                清除分类
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button variant="ghost" onClick={() => setIsQuickCategoryOpen(false)}>取消</Button>
+                                <Button onClick={handleSaveQuickCategory}>保存</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                 </div>
             </div>
 
@@ -1083,7 +1228,7 @@ export default function Home() {
                         </div>
                         {summary && (
                             <p className="text-sm text-muted-foreground">
-                                持仓总市值：<span className="font-mono font-bold text-foreground">¥{summary.totalValue.toLocaleString()}</span>
+                                组合视图：仅展示占比，不展示金额
                             </p>
                         )}
                     </CardHeader>
@@ -1106,7 +1251,7 @@ export default function Home() {
                                                         key={cat.category}
                                                         className={`${colors[i % colors.length]} transition-all`}
                                                         style={{ width: `${pct}%` }}
-                                                        title={`${cat.category}: ¥${cat.currentValue.toLocaleString()} (${pct.toFixed(1)}%)`}
+                                                        title={`${cat.category}: ${pct.toFixed(1)}%`}
                                                     />
                                                 );
                                             })}
@@ -1114,24 +1259,25 @@ export default function Home() {
                                                 <div
                                                     className="bg-gray-300"
                                                     style={{ width: `${summary.totalValue > 0 ? (summary.uncategorized.currentValue / summary.totalValue) * 100 : 0}%` }}
-                                                    title={`未分类: ¥${summary.uncategorized.currentValue.toLocaleString()}`}
+                                                    title={`未分类: ${summary.totalValue > 0 ? ((summary.uncategorized.currentValue / summary.totalValue) * 100).toFixed(1) : '0.0'}%`}
                                                 />
                                             )}
                                         </div>
                                         <div className="flex flex-wrap gap-3">
                                             {summary.categories.map((cat, i) => {
                                                 const colors = ['bg-blue-500','bg-emerald-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-cyan-500','bg-orange-500','bg-teal-500'];
+                                                const pct = summary.totalValue > 0 ? (cat.currentValue / summary.totalValue) * 100 : 0;
                                                 return (
                                                     <div key={cat.category} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                                         <div className={`w-2.5 h-2.5 rounded-full ${colors[i % colors.length]}`} />
-                                                        {cat.category}
+                                                        {cat.category} {pct.toFixed(1)}%
                                                     </div>
                                                 );
                                             })}
                                             {summary.uncategorized.currentValue > 0 && (
                                                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                                     <div className="w-2.5 h-2.5 rounded-full bg-gray-300" />
-                                                    未分类
+                                                    未分类 {summary.totalValue > 0 ? ((summary.uncategorized.currentValue / summary.totalValue) * 100).toFixed(1) : '0.0'}%
                                                 </div>
                                             )}
                                         </div>
@@ -1146,6 +1292,7 @@ export default function Home() {
                                         const isEditingThis = editingTarget?.category === cat.category;
                                         const totalPct = summary.totalValue > 0 ? (cat.currentValue / summary.totalValue * 100) : 0;
                                         const targetPct = summary.totalValue > 0 && hasTarget ? (cat.targetAmount / summary.totalValue * 100) : null;
+                                        const diffPct = summary.totalValue > 0 ? (cat.diff / summary.totalValue * 100) : 0;
 
                                         return (
                                             <div key={cat.category}>
@@ -1162,15 +1309,15 @@ export default function Home() {
                                                                 cat.diff < 0 ? 'bg-red-100 text-red-700' :
                                                                 'bg-gray-100 text-gray-500'
                                                             }`}>
-                                                                {cat.diff > 0 ? '+' : ''}{cat.diff.toLocaleString()}
+                                                                {diffPct > 0 ? '+' : ''}{diffPct.toFixed(1)}%
                                                             </span>
                                                         )}
                                                     </div>
                                                     <div className="flex items-center gap-3 shrink-0">
                                                         <div className="text-right">
-                                                            <div className="text-sm font-mono font-medium">¥{cat.currentValue.toLocaleString()}</div>
+                                                            <div className="text-sm font-mono font-medium">当前 {totalPct.toFixed(1)}%</div>
                                                             {hasTarget && (
-                                                                <div className="text-xs text-muted-foreground">目标 ¥{cat.targetAmount.toLocaleString()}{targetPct !== null && ` (${targetPct.toFixed(1)}%)`}</div>
+                                                                <div className="text-xs text-muted-foreground">目标 {targetPct !== null ? `${targetPct.toFixed(1)}%` : '--'}</div>
                                                             )}
                                                         </div>
                                                         {/* 目标编辑按钮 */}
@@ -1180,10 +1327,10 @@ export default function Home() {
                                                             className="h-7 px-2 text-xs text-muted-foreground"
                                                             onClick={e => {
                                                                 e.stopPropagation();
-                                                                setEditingTarget({ category: cat.category, value: cat.targetAmount > 0 ? cat.targetAmount.toString() : '' });
+                                                                setEditingTarget({ category: cat.category, value: targetPct !== null ? targetPct.toFixed(1) : '' });
                                                             }}
                                                         >
-                                                            {hasTarget ? '改目标' : '设目标'}
+                                                            {hasTarget ? '改目标占比' : '设目标占比'}
                                                         </Button>
                                                         <span className="text-muted-foreground text-xs">{isExpanded ? '▲' : '▼'}</span>
                                                     </div>
@@ -1192,15 +1339,16 @@ export default function Home() {
                                                 {/* 目标金额编辑行 */}
                                                 {isEditingThis && (
                                                     <div className="flex items-center gap-2 pb-2 px-1" onClick={e => e.stopPropagation()}>
-                                                        <span className="text-xs text-muted-foreground shrink-0">{cat.category} 目标金额 ¥</span>
+                                                        <span className="text-xs text-muted-foreground shrink-0">{cat.category} 目标占比</span>
                                                         <Input
                                                             type="number"
                                                             className="h-7 text-xs w-32"
                                                             value={editingTarget!.value}
                                                             onChange={e => setEditingTarget({ ...editingTarget!, value: e.target.value })}
-                                                            placeholder="0"
+                                                            placeholder="0 - 100"
                                                             autoFocus
                                                         />
+                                                        <span className="text-xs text-muted-foreground">%</span>
                                                         <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveTarget(cat.category, editingTarget!.value)}>保存</Button>
                                                         <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingTarget(null)}>取消</Button>
                                                     </div>
@@ -1210,9 +1358,17 @@ export default function Home() {
                                                 {isExpanded && (
                                                     <div className="pb-2 pl-2 space-y-1">
                                                         {cat.assets.map(a => (
-                                                            <div key={`${a.assetId}-${a.accountId}`} className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3">
+                                                            <div 
+                                                                key={`${a.assetId}-${a.accountId}`} 
+                                                                className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3 cursor-pointer hover:bg-muted/40 transition-colors"
+                                                                title="双击编辑资产"
+                                                                onDoubleClick={() => {
+                                                                    const asset = availableAssets.find(asset => asset.id === a.assetId);
+                                                                    if (asset) openEditAssetDialog(asset);
+                                                                }}
+                                                            >
                                                                 <span className="truncate">{a.name || a.symbol} <span className="opacity-60">({a.accountName})</span></span>
-                                                                <span className="font-mono shrink-0 ml-2">¥{a.value.toLocaleString()}</span>
+                                                                <span className="font-mono shrink-0 ml-2">{summary.totalValue > 0 ? ((a.value / summary.totalValue) * 100).toFixed(2) : '0.00'}%</span>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1233,16 +1389,24 @@ export default function Home() {
                                                     <span className="text-xs text-muted-foreground">点击资产管理→编辑资产→设置大类</span>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    <span className="text-sm font-mono">¥{summary.uncategorized.currentValue.toLocaleString()}</span>
+                                                    <span className="text-sm font-mono">{summary.totalValue > 0 ? ((summary.uncategorized.currentValue / summary.totalValue) * 100).toFixed(1) : '0.0'}%</span>
                                                     <span className="text-muted-foreground text-xs">{expandedCategories.has('__uncategorized__') ? '▲' : '▼'}</span>
                                                 </div>
                                             </div>
                                             {expandedCategories.has('__uncategorized__') && (
                                                 <div className="pb-2 pl-2 space-y-1">
                                                     {summary.uncategorized.assets.map(a => (
-                                                        <div key={`${a.assetId}-${a.accountId}`} className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3">
+                                                        <div 
+                                                            key={`${a.assetId}-${a.accountId}`} 
+                                                            className="flex justify-between items-center text-xs text-muted-foreground py-1 border-l-2 border-muted pl-3 cursor-pointer hover:bg-muted/40 transition-colors"
+                                                            title="双击编辑资产"
+                                                            onDoubleClick={() => {
+                                                                const asset = availableAssets.find(asset => asset.id === a.assetId);
+                                                                if (asset) openEditAssetDialog(asset);
+                                                            }}
+                                                        >
                                                             <span className="truncate">{a.name || a.symbol} <span className="opacity-60">({a.accountName})</span></span>
-                                                            <span className="font-mono shrink-0 ml-2">¥{a.value.toLocaleString()}</span>
+                                                            <span className="font-mono shrink-0 ml-2">{summary.totalValue > 0 ? ((a.value / summary.totalValue) * 100).toFixed(2) : '0.00'}%</span>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1352,12 +1516,21 @@ export default function Home() {
                                     {portfolio.positions.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
-                                暂无持仓，请点击&ldquo;记一笔&rdquo;添加交易
-                                            </TableCell>
+                                暂无持仓，请点击&ldquo;买入&rdquo;添加交易
+                                                </TableCell>
                                         </TableRow>
                                     ) : (
                                         getSortedPositions(portfolio.positions).map((pos) => (
-                                            <TableRow key={pos.assetId}>
+                                            <TableRow 
+                                                key={pos.assetId}
+                                                className="cursor-pointer hover:bg-muted/50"
+                                                title="双击编辑资产"
+                                                onDoubleClick={(e) => {
+                                                    if ((e.target as HTMLElement).closest('button')) return;
+                                                    const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                                    if (asset) openEditAssetDialog(asset);
+                                                }}
+                                            >
                                                 <TableCell>
                                                     <div className="font-medium">{pos.name || pos.symbol}</div>
                                                     <div className="text-xs text-muted-foreground">{pos.symbol}</div>
@@ -1380,7 +1553,23 @@ export default function Home() {
                                                 <TableCell className="text-right">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <span>{pos.currentPercent}%</span>
-                                                        <span className="text-xs text-muted-foreground">/ {pos.targetPercent}%</span>
+                                                        <div className="relative">
+                                                            <input
+                                                                type="number"
+                                                                step="0.1"
+                                                                min="0"
+                                                                max="100"
+                                                                value={pos.targetPercent}
+                                                                onChange={async (e) => {
+                                                                    const newPercent = parseFloat(e.target.value);
+                                                                    if (!isNaN(newPercent)) {
+                                                                        await handleUpsertAllocationTarget(portfolio.account.id, pos.assetId, newPercent);
+                                                                    }
+                                                                }}
+                                                                className="w-16 text-right text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                            />
+                                                            <span className="text-xs text-muted-foreground ml-1">%</span>
+                                                        </div>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
@@ -1406,9 +1595,23 @@ export default function Home() {
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-1">
-                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
-                                                            onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
+                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="编辑资产" onClick={() => {
+                                                            const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                                            if (asset) openEditAssetDialog(asset);
+                                                        }}>
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                                                        </Button>
+                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="调整配置" onClick={() => openAllocationDialog(portfolio.account.id)}>
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.7 2.84"></path><path d="M9 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path></svg>
+                                                        </Button>
+                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="卖出" onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
                                                             <DollarSign className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-500" title="删除资产" onClick={() => {
+                                                            const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                                            if (asset) handleDeleteAsset(asset.id);
+                                                        }}>
+                                                            <Trash2 className="h-4 w-4" />
                                                         </Button>
                                                     </div>
                                                 </TableCell>
@@ -1423,21 +1626,46 @@ export default function Home() {
                         <div className="md:hidden space-y-3">
                             {portfolio.positions.length === 0 ? (
                                 <div className="text-center text-muted-foreground py-8">
-                                    暂无持仓，请点击&ldquo;记一笔&rdquo;添加交易
+                                    暂无持仓，请点击&ldquo;买入&rdquo;添加交易
                                 </div>
                             ) : (
                                 getSortedPositions(portfolio.positions).map((pos) => (
-                                    <div key={pos.assetId} className="bg-muted/30 rounded-lg p-4 space-y-3">
+                                    <div 
+                                        key={pos.assetId} 
+                                        className="bg-muted/30 rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/40"
+                                        title="双击编辑资产"
+                                        onDoubleClick={(e) => {
+                                            if ((e.target as HTMLElement).closest('button')) return;
+                                            const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                            if (asset) openEditAssetDialog(asset);
+                                        }}
+                                    >
                                         {/* 资产名称和代码 */}
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <div className="font-medium text-base">{pos.name || pos.symbol}</div>
                                                 <div className="text-xs text-muted-foreground">{pos.symbol}</div>
                                             </div>
-                                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
-                                                onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
-                                                <DollarSign className="h-4 w-4" />
-                                            </Button>
+                                            <div className="flex gap-1">
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="编辑资产" onClick={() => {
+                                                    const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                                    if (asset) openEditAssetDialog(asset);
+                                                }}>
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                                                </Button>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="调整配置" onClick={() => openAllocationDialog(portfolio.account.id)}>
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.7 2.84"></path><path d="M9 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path></svg>
+                                                </Button>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="卖出" onClick={() => openSellDialog(portfolio.account.id, pos.symbol, pos.shares)}>
+                                                    <DollarSign className="h-4 w-4" />
+                                                </Button>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-500" title="删除资产" onClick={() => {
+                                                    const asset = availableAssets.find(a => a.symbol === pos.symbol);
+                                                    if (asset) handleDeleteAsset(asset.id);
+                                                }}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </div>
 
                                         {/* 主要数据网格 */}
@@ -1463,7 +1691,26 @@ export default function Home() {
                                             <div className="bg-background rounded p-2">
                                                 <div className="text-xs text-muted-foreground mb-1">配置比例</div>
                                                 <div className="font-medium">{pos.currentPercent}%</div>
-                                                <div className="text-xs text-muted-foreground">目标: {pos.targetPercent}%</div>
+                                                <div className="text-xs text-muted-foreground flex items-center justify-between mt-1">
+                                                    <span>目标:</span>
+                                                    <div className="flex items-center">
+                                                        <input
+                                                            type="number"
+                                                            step="0.1"
+                                                            min="0"
+                                                            max="100"
+                                                            value={pos.targetPercent}
+                                                            onChange={async (e) => {
+                                                                const newPercent = parseFloat(e.target.value);
+                                                                if (!isNaN(newPercent)) {
+                                                                    await handleUpsertAllocationTarget(portfolio.account.id, pos.assetId, newPercent);
+                                                                }
+                                                            }}
+                                                            className="w-16 text-right text-xs border rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                        />
+                                                        <span className="text-xs text-muted-foreground ml-1">%</span>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -1504,8 +1751,19 @@ export default function Home() {
                         <Button variant="outline" size="sm" onClick={() => openAllocationDialog(portfolio.account.id)}>
                             <TrendingUp className="mr-2 h-4 w-4" /> 配置
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => openTxDialog(portfolio.account.id)}>
-                            <Plus className="mr-2 h-4 w-4" /> 记一笔
+                        <Button variant="outline" size="sm" onClick={() => {
+                            setSelectedAccountId(portfolio.account.id);
+                            setNewTx(prev => ({ ...prev, accountId: portfolio.account.id, type: 'buy', symbol: '', price: '' }));
+                            setIsTxOpen(true);
+                        }}>
+                            <Plus className="mr-2 h-4 w-4" /> 买入
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => {
+                            setSelectedAccountId(portfolio.account.id);
+                            setNewTx(prev => ({ ...prev, accountId: portfolio.account.id, type: 'sell', symbol: '', price: '' }));
+                            setIsTxOpen(true);
+                        }}>
+                            <DollarSign className="mr-2 h-4 w-4" /> 卖出
                         </Button>
                         {portfolio.account.marketType === 'otc' && (
                             <Button variant="outline" size="sm" onClick={() => openManualHoldingDialog(portfolio.account)}>

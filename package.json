@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "electron:dev": "electron .",
+    "dev:webpack": "next dev --webpack",
+    "electron:only": "cross-env NEXT_EXTERNAL_SERVER=1 electron .",
+    "electron:dev": "concurrently -k \"npm run dev:webpack\" \"npm run electron:only\"",
     "seed": "npx tsx prisma/seed.ts",
     "sync:assets": "npx tsx scripts/sync-asset-metadata.ts",
     "build": "npx prisma generate && npx prisma migrate deploy && next build",

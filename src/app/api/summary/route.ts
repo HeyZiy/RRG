@@ -3,12 +3,19 @@ import prisma from '@/lib/db';
 
 export async function GET() {
   try {
+    const CASH_CATEGORY = '现金';
+
     // 1. 拉取所有账户的持仓（含 asset 信息）
     const holdings = await prisma.holding.findMany({
       include: {
         asset: true,
         account: { select: { id: true, name: true, marketType: true } },
       },
+    });
+
+    // 1.1 拉取所有账户现金
+    const accounts = await prisma.account.findMany({
+      select: { id: true, name: true, cash: true },
     });
 
     // 2. 拉取所有大类目标配置
@@ -47,6 +54,33 @@ export async function GET() {
     }> = [];
 
     let totalValue = 0;
+
+    // 现金作为独立大类纳入全局组合占比
+    const totalCash = accounts.reduce((sum, account) => sum + (account.cash ?? 0), 0);
+    totalValue += totalCash;
+
+    if (totalCash !== 0) {
+      const cashTarget = targetMap.get(CASH_CATEGORY);
+      categoryMap.set(CASH_CATEGORY, {
+        category: CASH_CATEGORY,
+        currentValue: totalCash,
+        targetAmount: cashTarget?.targetAmount ?? 0,
+        targetId: cashTarget?.id ?? null,
+        note: cashTarget?.note ?? null,
+        assets: accounts
+          .filter((account) => (account.cash ?? 0) !== 0)
+          .map((account) => ({
+            assetId: -account.id,
+            symbol: 'CASH',
+            name: `${account.name} 现金`,
+            accountId: account.id,
+            accountName: account.name,
+            shares: account.cash,
+            price: 1,
+            value: parseFloat(account.cash.toFixed(2)),
+          })),
+      });
+    }
 
     for (const h of holdings) {
       const price = h.asset.currentPrice ?? 0;

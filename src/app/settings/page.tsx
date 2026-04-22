@@ -119,12 +119,55 @@ export default function SettingsPage() {
                             <RefreshCcw className="mr-2 h-4 w-4" /> 立即重启应用
                         </Button>
                     ) : (
-                        <div /> // spacer
+                        <div />
                     )}
                     <Button disabled={dbPath === originalPath || loading} onClick={handleSave}>
                         {loading && <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />}
                         {!loading && <Save className="mr-2 h-4 w-4" />}
                         {saved ? '已保存' : '保存设置'} 
+                    </Button>
+                </CardFooter>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>资产管理</CardTitle>
+                    <CardDescription>批量更新资产信息</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label>更新所有资产名称</Label>
+                        <p className="text-sm text-muted-foreground">
+                            从东方财富自动获取并更新所有资产的官方名称，确保资产信息的准确性。
+                        </p>
+                    </div>
+                </CardContent>
+                <CardFooter className="border-t bg-muted/50 px-6 py-4">
+                    <Button onClick={async () => {
+                        setLoading(true);
+                        try {
+                            const res = await fetch('/api/assets/sync', { method: 'POST' });
+                            const data = await res.json();
+                            if (res.ok) {
+                                alert(`更新完成：\n` +
+                                    `总资产数：${data.total}\n` +
+                                    `更新名称：${data.updatedNameCount}\n` +
+                                    `更新价格：${data.updatedPriceCount}\n` +
+                                    `未变化：${data.unchangedCount}\n` +
+                                    `失败：${data.failedCount}`);
+                            } else {
+                                alert('更新失败：' + (data.error || '未知错误'));
+                            }
+                        } catch (error) {
+                            console.error('更新资产名称失败', error);
+                            alert('更新失败，请稍后重试');
+                        } finally {
+                            setLoading(false);
+                        }
+                    }} disabled={loading}>
+                        {loading && <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />}
+                        {!loading && <RefreshCcw className="mr-2 h-4 w-4" />}
+                        {loading ? '更新中...' : '更新所有资产名称'}
                     </Button>
                 </CardFooter>
             </Card>

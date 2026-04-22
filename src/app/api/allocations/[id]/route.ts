@@ -27,11 +27,31 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
     const data = await request.json();
+    const targetPercent = Number(data.targetPercent);
+    if (Number.isNaN(targetPercent) || targetPercent < 0 || targetPercent > 100) {
+      return NextResponse.json({ error: 'targetPercent must be between 0 and 100' }, { status: 400 });
+    }
+
+    const current = await prisma.assetAllocation.findUnique({ where: { id } });
+    if (!current) {
+      return NextResponse.json({ error: 'Allocation not found' }, { status: 404 });
+    }
+
+    const otherTotal = await prisma.assetAllocation.aggregate({
+      where: {
+        accountId: current.accountId,
+        NOT: { id: current.id },
+      },
+      _sum: { targetPercent: true },
+    });
+    const otherPercent = otherTotal._sum.targetPercent ?? 0;
+    if (otherPercent + targetPercent > 100) {
+      return NextResponse.json({ error: '配置比例总和不能超过100%' }, { status: 400 });
+    }
+
     const allocation = await prisma.assetAllocation.update({
       where: { id },
-      data: {
-        targetPercent: data.targetPercent,
-      },
+      data: { targetPercent },
       include: { asset: true, account: true },
     });
     return NextResponse.json(allocation);

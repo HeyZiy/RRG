@@ -76,6 +76,8 @@ model AssetAllocation {
   updatedAt    DateTime @updatedAt
   account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, assetId]) // 每个账户同一资产只能有一条配置
 }
 
 model Transaction {
