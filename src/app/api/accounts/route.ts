@@ -1,40 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/db';
+import { accountService } from '@/server/services/account.service';
+import { apiError, apiServerError, parseIntField, parseNumberField } from '@/lib/api-response';
 
 export async function GET() {
   try {
-    const accounts = await prisma.account.findMany({
-      include: {
-        allocations: { include: { asset: true } },
-        transactions: { include: { asset: true } },
-        holdings: { include: { asset: true } }, // Newly added relation
-      },
-      orderBy: { id: 'asc' },
-    });
+    const accounts = await accountService.getAllAccounts();
     return NextResponse.json(accounts);
-  } catch (error: any) {
-    console.error('API Error:', error); // Log actual error
-    return NextResponse.json({ error: 'Failed to fetch accounts', details: error.message }, { status: 500 });
+  } catch (error) {
+    return apiServerError('Failed to fetch accounts', error);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const data = await request.json();
-    const createData: any = {
-      name: data.name,
-      platform: data.platform ?? null,
-      targetAmount: data.targetAmount != null ? parseFloat(data.targetAmount) : null,
-      cash: data.cash != null ? parseFloat(data.cash) : 0,
-    };
-    if (data.marketType) {
-      createData.marketType = data.marketType;
+    if (!data?.name || String(data.name).trim() === '') {
+      return apiError('Account name is required', 400);
     }
-    const account = await prisma.account.create({ data: createData });
+
+    const cash = data.cash != null ? parseNumberField(data.cash) : 0;
+    if (cash === null) {
+      return apiError('cash must be a valid number', 400);
+    }
+
+    const targetAmount =
+      data.targetAmount != null && String(data.targetAmount).trim() !== ''
+        ? parseNumberField(data.targetAmount)
+        : null;
+    if (data.targetAmount != null && String(data.targetAmount).trim() !== '' && targetAmount === null) {
+      return apiError('targetAmount must be a valid number', 400);
+    }
+
+    const account = await accountService.createAccount({
+      name: data.name,
+      platform: data.platform,
+      targetAmount,
+      cash,
+      marketType: data.marketType,
+    });
     return NextResponse.json(account, { status: 201 });
-  } catch (error: any) {
-    console.error('API Error:', error);
-    return NextResponse.json({ error: 'Failed to create account', details: error.message }, { status: 500 });
+  } catch (error) {
+    return apiServerError('Failed to create account', error);
   }
 }
 
@@ -43,26 +49,43 @@ export async function PUT(request: NextRequest) {
     const data = await request.json();
     const { id, name, platform, marketType, targetAmount, cash } = data;
 
-    if (!id) {
-        return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
+    const accountId = parseIntField(id);
+    if (accountId === null) {
+        return apiError('Account ID is required', 400);
     }
 
-    const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
-    if (platform !== undefined) updateData.platform = platform;
-    if (marketType !== undefined) updateData.marketType = marketType;
-    if (targetAmount !== undefined) updateData.targetAmount = targetAmount;
-    if (cash !== undefined && cash !== null) updateData.cash = cash;
+    let parsedTargetAmount: number | null | undefined = targetAmount;
+    if (targetAmount !== undefined) {
+      if (targetAmount === null || String(targetAmount).trim() === '') {
+        parsedTargetAmount = null;
+      } else {
+        parsedTargetAmount = parseNumberField(targetAmount);
+        if (parsedTargetAmount === null) {
+          return apiError('targetAmount must be a valid number', 400);
+        }
+      }
+    }
 
-    const account = await prisma.account.update({
-        where: { id: parseInt(id) },
-        data: updateData
+    let parsedCash = cash;
+    if (cash !== undefined && cash !== null) {
+      parsedCash = parseNumberField(cash);
+      if (parsedCash === null) {
+        return apiError('cash must be a valid number', 400);
+      }
+    }
+
+    const account = await accountService.updateAccount({
+      id: accountId,
+      name,
+      platform,
+      marketType,
+      targetAmount: parsedTargetAmount,
+      cash: parsedCash,
     });
 
     return NextResponse.json(account);
-  } catch (error: any) {
-    console.error('API Error:', error);
-    return NextResponse.json({ error: 'Failed to update account' }, { status: 500 });
+  } catch (error) {
+    return apiServerError('Failed to update account', error);
   }
 }
 
@@ -70,18 +93,16 @@ export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    
-    if (!id) {
-      return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
+
+    const accountId = parseIntField(id);
+    if (accountId === null) {
+      return apiError('Account ID is required', 400);
     }
-    
-    await prisma.account.delete({
-      where: { id: parseInt(id) },
-    });
-    
+
+    await accountService.deleteAccount(accountId);
+
     return NextResponse.json({ message: 'Account deleted successfully' }, { status: 200 });
-  } catch (error: any) {
-    console.error('API Error:', error);
-    return NextResponse.json({ error: 'Failed to delete account', details: error.message }, { status: 500 });
+  } catch (error) {
+    return apiServerError('Failed to delete account', error);
   }
 }

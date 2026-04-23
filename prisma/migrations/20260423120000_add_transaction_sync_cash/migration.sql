@@ -1,0 +1,1 @@
+ALTER TABLE "Transaction" ADD COLUMN "syncCash" BOOLEAN NOT NULL DEFAULT true;

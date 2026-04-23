@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
+import { apiError, apiServerError, parseIntField, parseNumberField } from '@/lib/api-response';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt((await params).id);
-    if (isNaN(id)) {
-      return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+    const id = parseIntField((await params).id);
+    if (id === null) {
+      return apiError('Invalid id', 400);
     }
     await prisma.assetAllocation.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete allocation' }, { status: 500 });
+    return apiServerError('Failed to delete allocation', error);
   }
 }
 
@@ -22,19 +23,19 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt((await params).id);
-    if (isNaN(id)) {
-      return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+    const id = parseIntField((await params).id);
+    if (id === null) {
+      return apiError('Invalid id', 400);
     }
     const data = await request.json();
-    const targetPercent = Number(data.targetPercent);
-    if (Number.isNaN(targetPercent) || targetPercent < 0 || targetPercent > 100) {
-      return NextResponse.json({ error: 'targetPercent must be between 0 and 100' }, { status: 400 });
+    const targetPercent = parseNumberField(data.targetPercent);
+    if (targetPercent === null || targetPercent < 0 || targetPercent > 100) {
+      return apiError('targetPercent must be between 0 and 100', 400);
     }
 
     const current = await prisma.assetAllocation.findUnique({ where: { id } });
     if (!current) {
-      return NextResponse.json({ error: 'Allocation not found' }, { status: 404 });
+      return apiError('Allocation not found', 404);
     }
 
     const otherTotal = await prisma.assetAllocation.aggregate({
@@ -46,7 +47,7 @@ export async function PUT(
     });
     const otherPercent = otherTotal._sum.targetPercent ?? 0;
     if (otherPercent + targetPercent > 100) {
-      return NextResponse.json({ error: '配置比例总和不能超过100%' }, { status: 400 });
+      return apiError('配置比例总和不能超过100%', 400);
     }
 
     const allocation = await prisma.assetAllocation.update({
@@ -56,6 +57,6 @@ export async function PUT(
     });
     return NextResponse.json(allocation);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update allocation' }, { status: 500 });
+    return apiServerError('Failed to update allocation', error);
   }
 }

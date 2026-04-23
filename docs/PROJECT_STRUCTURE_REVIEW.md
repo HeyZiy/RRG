@@ -116,6 +116,14 @@
 - 拆分 `src/app/page.tsx` 的数据请求与业务动作为 hooks/actions。
 - 统一 API 输入校验和错误返回格式。
 
+当前进展：
+- 已抽离 `useDashboardData`（`src/features/dashboard/hooks/useDashboardData.ts`），承接首页核心数据获取与刷新。
+- 已抽离 `useAllocationManager`（`src/features/dashboard/hooks/useAllocationManager.ts`），承接配置弹窗的状态、增删改与账户配置拉取。
+- 已抽离 `useTransactionManager`（`src/features/dashboard/hooks/useTransactionManager.ts`），承接交易创建、历史查询、筛选与删除联动刷新。
+- 已建立共享类型文件 `src/features/dashboard/types.ts`，减少页面内重复类型定义。
+- 已新增统一响应工具 `src/lib/api-response.ts`，并在 accounts/assets 路由落地第一批校验与错误格式统一。
+- allocations/transactions 路由已完成第二批统一，输入解析与错误响应结构对齐。
+
 ### P1（下周）
 - 抽出服务层并迁移重复业务逻辑。
 - 为 allocations/transactions/summary 增加基础集成测试。

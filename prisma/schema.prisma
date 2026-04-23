@@ -89,6 +89,7 @@ model Transaction {
   price     Float
   shares    Float
   date      DateTime
+  syncCash  Boolean  @default(true) // 是否同步账户现金余额
   createdAt DateTime @default(now())
   account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)

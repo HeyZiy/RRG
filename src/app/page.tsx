@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useDashboardData } from '@/features/dashboard/hooks/useDashboardData';
+import { useAllocationManager } from '@/features/dashboard/hooks/useAllocationManager';
+import { useTransactionManager } from '@/features/dashboard/hooks/useTransactionManager';
+import type {
+    AssetItem,
+    PortfolioAccount,
+    PortfolioPosition,
+} from '@/features/dashboard/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,153 +16,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { RefreshCw, Plus, ArrowRight, Wallet, TrendingUp, DollarSign, History, Trash2 } from 'lucide-react';
-
-// --- Interfaces matching new backend logic ---
-
-interface PortfolioPosition {
-    assetId: number;
-    symbol: string;
-    name: string;
-    shares: number;
-    avgCost?: number;
-    price: number;
-    currentValue: number;      // shares * price
-    cost?: number;             // shares * avgCost
-    profitLoss?: number;       // currentValue - cost
-    profitLossPercent?: number; // (profitLoss / cost) * 100
-    currentPercent: number;    // of total portfolio
-    targetPercent: number;     // target allocation
-    targetValue: number;
-    driftValue: number;        // difference (positive = need buy)
-    actionShares: number;      // suggested buy/sell shares
-    actionAmount: number;      // suggested buy/sell amount (for OTC funds)
-    isOTC?: boolean;           // whether this is an OTC fund
-}
-
-interface PortfolioAccount {
-    id: number;
-    name: string;
-    platform?: string;
-    marketType: string;        // "exchange" 场内, "otc" 场外
-    cash: number;
-    totalValue: number;        // cash + holdings
-    holdingsValue: number;
-    targetAmount?: number;     // Optional target total amount
-}
-
-interface PortfolioResponse {
-    account: PortfolioAccount;
-    positions: PortfolioPosition[];
-}
-
-interface Transaction {
-    id: number;
-    accountId: number;
-    assetId: number;
-    type: 'buy' | 'sell';
-    amount: number;
-    price: number;
-    shares: number;
-    date: string;
-    createdAt: string;
-    asset: {
-        id: number;
-        symbol: string;
-        name: string;
-    };
-    account: {
-        id: number;
-        name: string;
-    };
-}
-
-interface AllocationItem {
-    id: number;
-    accountId: number;
-    assetId: number;
-    targetPercent: number;
-    asset: {
-        id: number;
-        symbol: string;
-        name: string;
-    };
-}
-
-// --- Summary Interfaces ---
-
-interface SummaryAsset {
-    assetId: number;
-    symbol: string;
-    name: string;
-    accountId: number;
-    accountName: string;
-    shares: number;
-    price: number;
-    value: number;
-}
-
-interface SummaryCategory {
-    category: string;
-    currentValue: number;
-    targetAmount: number;
-    targetId: number | null;
-    note: string | null;
-    diff: number;
-    assets: SummaryAsset[];
-}
-
-interface SummaryResponse {
-    totalValue: number;
-    categories: SummaryCategory[];
-    uncategorized: {
-        currentValue: number;
-        assets: SummaryAsset[];
-    };
-}
+import { RefreshCw, Plus, Wallet, TrendingUp, DollarSign, History, Trash2 } from 'lucide-react';
 
 // --- Main Component ---
 
 export default function Home() {
-    const [portfolios, setPortfolios] = useState<PortfolioResponse[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [refreshingPrices, setRefreshingPrices] = useState(false);
-    const [submittingTx, setSubmittingTx] = useState(false);
+    const {
+        portfolios,
+        availableAssets,
+        summary,
+        loading,
+        summaryLoading,
+        refreshingPrices,
+        fetchAllPortfolios,
+        fetchAvailableAssets,
+        fetchSummary,
+        handleRefreshPrices,
+    } = useDashboardData();
+
     const [submittingHolding, setSubmittingHolding] = useState(false);
 
     // Dialog States
     const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
     const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
-    const [isTxOpen, setIsTxOpen] = useState(false);
     const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-    const [isAllocationOpen, setIsAllocationOpen] = useState(false);
     const [isAssetManageOpen, setIsAssetManageOpen] = useState(false);
     const [isEditAssetOpen, setIsEditAssetOpen] = useState(false);
     const [isDepositCashOpen, setIsDepositCashOpen] = useState(false);
     const [isManualHoldingOpen, setIsManualHoldingOpen] = useState(false);
-    const [isTransactionHistoryOpen, setIsTransactionHistoryOpen] = useState(false);
     const [isQuickCategoryOpen, setIsQuickCategoryOpen] = useState(false);
 
     // Selection Context
-    const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
     const [accountToDelete, setAccountToDelete] = useState<number | null>(null);
-    const [accountForAllocation, setAccountForAllocation] = useState<number | null>(null);
     const [accountToEdit, setAccountToEdit] = useState<PortfolioAccount | null>(null);
     const [accountForDeposit, setAccountForDeposit] = useState<PortfolioAccount | null>(null);
-    const [editingAsset, setEditingAsset] = useState<any | null>(null);
+    const [editingAsset, setEditingAsset] = useState<AssetItem | null>(null);
     const [quickCategoryAssetId, setQuickCategoryAssetId] = useState<number | null>(null);
     const [quickCategoryValue, setQuickCategoryValue] = useState('');
 
     // Forms Data
-    const [allocations, setAllocations] = useState<AllocationItem[]>([]);
-    const [newAllocation, setNewAllocation] = useState({
-        assetType: 'existing', // 'existing' or 'new'
-        assetId: '',
-        targetPercent: '',
-        newAssetName: '',
-        newAssetSymbol: ''
-    });
-    const [availableAssets, setAvailableAssets] = useState<any[]>([]);
     const [newAccount, setNewAccount] = useState({ name: '', platform: '', marketType: 'exchange', cash: '0' });
     const [editAccountData, setEditAccountData] = useState({ name: '', platform: '', marketType: 'exchange', targetAmount: '', cash: '' });
     const [editingAssetData, setEditingAssetData] = useState({ name: '', type: '', currentPrice: '', category: '' });
@@ -169,106 +69,49 @@ export default function Home() {
         avgCost: '',
         currentPrice: ''
     });
-    const [newTx, setNewTx] = useState({
-        accountId: 0,
-        type: 'buy',
-        symbol: '',
-        shares: '0',
-        price: '',
-        date: ''
+    const {
+        allocations,
+        isAllocationOpen,
+        setIsAllocationOpen,
+        newAllocation,
+        setNewAllocation,
+        handleAddAllocation,
+        handleUpdateAllocation,
+        handleDeleteAllocation,
+        handleUpsertAllocationTarget,
+        openAllocationDialog,
+    } = useAllocationManager({
+        fetchAllPortfolios,
+        fetchAvailableAssets,
     });
 
-    // Transaction History State
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
-    const [loadingTransactions, setLoadingTransactions] = useState(false);
-    const [selectedAccountForHistory, setSelectedAccountForHistory] = useState<number | null>(null);
-    const [transactionFilterSymbol, setTransactionFilterSymbol] = useState<string>('');
+    const {
+        isTxOpen,
+        setIsTxOpen,
+        submittingTx,
+        newTx,
+        setNewTx,
+        openBuyDialog,
+        openSellDialog,
+        handleCreateTransaction,
+        isTransactionHistoryOpen,
+        setIsTransactionHistoryOpen,
+        loadingTransactions,
+        transactionFilterSymbol,
+        setTransactionFilterSymbol,
+        openTransactionHistory,
+        handleDeleteTransaction,
+        filteredTransactions,
+    } = useTransactionManager({
+        fetchAllPortfolios,
+    });
 
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: keyof PortfolioPosition | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
     // Global Summary State
-    const [summary, setSummary] = useState<SummaryResponse | null>(null);
-    const [summaryLoading, setSummaryLoading] = useState(false);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
     const [editingTarget, setEditingTarget] = useState<{ category: string; value: string } | null>(null);
-
-    // Init Date on client only to avoid hydration mismatch
-    useEffect(() => {
-        setNewTx(prev => ({ ...prev, date: new Date().toISOString().split('T')[0] }));
-    }, []);
-
-    // --- Data Fetching ---
-
-    const fetchAllPortfolios = async (showLoading = false) => {
-        if (showLoading) setLoading(true);
-        try {
-            // 1. Get List of Accounts
-            const accRes = await fetch('/api/accounts');
-            const accountsPayload = await accRes.json();
-
-            if (!accRes.ok) {
-                const message =
-                    (accountsPayload && accountsPayload.error) ||
-                    '账户列表获取失败';
-                throw new Error(message);
-            }
-
-            const accounts = Array.isArray(accountsPayload) ? accountsPayload : [];
-
-            if (accounts.length === 0) {
-                setPortfolios([]);
-                return;
-            }
-
-            // 2. Fetch Portfolio for each account (Parallel)
-            const promises = accounts.map((acc: any) =>
-                fetch(`/api/portfolio?accountId=${acc.id}`).then(r => r.json())
-            );
-
-            const portfolioData = await Promise.all(promises);
-            setPortfolios(portfolioData.filter(p => !p.error));
-        } catch (error) {
-            console.error('Failed to load data', error);
-            setPortfolios([]);
-        } finally {
-            if (showLoading) setLoading(false);
-        }
-    };
-
-    const fetchSummary = async () => {
-        setSummaryLoading(true);
-        try {
-            const res = await fetch('/api/summary');
-            if (res.ok) {
-                const data = await res.json();
-                setSummary(data);
-            }
-        } catch (e) {
-            console.error('Failed to fetch summary', e);
-        } finally {
-            setSummaryLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchAllPortfolios();
-        fetchAvailableAssets();
-        fetchSummary();
-    }, []);
-
-    const handleRefreshPrices = async () => {
-        setRefreshingPrices(true);
-        try {
-            await fetch('/api/prices/refresh', { method: 'POST' });
-            await fetchAllPortfolios();
-            await fetchSummary();
-        } catch (e) {
-            alert('行情更新失败');
-        } finally {
-            setRefreshingPrices(false);
-        }
-    };
 
     const toggleCategoryExpand = (cat: string) => {
         setExpandedCategories(prev => {
@@ -351,36 +194,6 @@ export default function Home() {
         }
     };
 
-    const handleCreateTransaction = async () => {
-        if (submittingTx) return;
-        if (!newTx.accountId) return alert('请选择账户');
-        if (!newTx.symbol && !newTx.price) return alert('请输入代码');
-
-        setSubmittingTx(true);
-        try {
-            const res = await fetch('/api/transactions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...newTx,
-                    shares: parseFloat(newTx.shares),
-                    price: newTx.price ? parseFloat(newTx.price) : null,
-                }),
-            });
-
-            if (res.ok) {
-                setIsTxOpen(false);
-                setNewTx({ accountId: 0, type: 'buy', symbol: '', shares: '0', price: '', date: new Date().toISOString().split('T')[0] });
-                await fetchAllPortfolios();
-            } else {
-                const err = await res.json();
-                alert(err.error || '交易创建失败');
-            }
-        } finally {
-            setSubmittingTx(false);
-        }
-    };
-
     const handleDeleteAccount = async () => {
         if (!accountToDelete) return;
 
@@ -448,7 +261,7 @@ export default function Home() {
         }
     };
 
-    const openEditAssetDialog = (asset: any) => {
+    const openEditAssetDialog = (asset: AssetItem) => {
         setEditingAsset(asset);
         setEditingAssetData({
             name: asset.name || '',
@@ -459,27 +272,16 @@ export default function Home() {
         setIsEditAssetOpen(true);
     };
 
-    const openQuickCategoryDialog = (assetId: number) => {
-        const asset = availableAssets.find(a => a.id === assetId);
-        if (!asset) return;
-        setQuickCategoryAssetId(asset.id);
-        setQuickCategoryValue(asset.category || '');
-        setIsQuickCategoryOpen(true);
-    };
-
     const handleSaveQuickCategory = async () => {
         if (!quickCategoryAssetId) return;
-        const asset = availableAssets.find(a => a.id === quickCategoryAssetId);
-        if (!asset) return;
 
+        // 直接使用assetId发送请求，不依赖availableAssets数组
+        // 这样即使是新创建的资产也能设置分类
         const res = await fetch('/api/assets', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                id: asset.id,
-                name: asset.name,
-                type: asset.type,
-                currentPrice: asset.currentPrice,
+                id: quickCategoryAssetId,
                 category: quickCategoryValue,
             }),
         });
@@ -488,6 +290,7 @@ export default function Home() {
             setIsQuickCategoryOpen(false);
             setQuickCategoryAssetId(null);
             setQuickCategoryValue('');
+            // 刷新资产列表和汇总数据
             await fetchAvailableAssets();
             await fetchSummary();
             await fetchAllPortfolios();
@@ -497,211 +300,7 @@ export default function Home() {
         }
     };
 
-    // --- Asset Allocation Functions ---  
-
-    const normalizeAllocations = (data: unknown): AllocationItem[] => {
-        if (!Array.isArray(data)) {
-            return [];
-        }
-
-        const map = new Map<number, AllocationItem>();
-        data.forEach((item) => {
-            const row = item as AllocationItem;
-            if (typeof row?.assetId !== 'number') {
-                return;
-            }
-            if (!map.has(row.assetId)) {
-                map.set(row.assetId, row);
-            }
-        });
-
-        return Array.from(map.values());
-    };
-
-    const fetchAllocations = async (accountId: number) => {
-        try {
-            const res = await fetch(`/api/allocations?accountId=${accountId}`);
-            const data = await res.json();
-            setAllocations(normalizeAllocations(data));
-        } catch (error) {
-            console.error('Failed to fetch allocations', error);
-            setAllocations([]);
-        }
-    };
-
-    const fetchAvailableAssets = async () => {
-        try {
-            const res = await fetch('/api/assets');
-            const data = await res.json();
-            setAvailableAssets(data);
-        } catch (error) {
-            console.error('Failed to fetch assets', error);
-        }
-    };
-
-    const handleUpsertAllocationTarget = async (accountId: number, assetId: number, targetPercent: number) => {
-        const currentTotal = allocations.reduce((sum, alloc) => {
-            if (alloc.accountId !== accountId || alloc.assetId === assetId) {
-                return sum;
-            }
-            return sum + alloc.targetPercent;
-        }, 0);
-
-        if (currentTotal + targetPercent > 100) {
-            alert('配置比例总和不能超过100%');
-            return false;
-        }
-
-        const res = await fetch('/api/allocations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                accountId,
-                assetId,
-                targetPercent,
-            }),
-        });
-
-        if (!res.ok) {
-            const err = await res.json();
-            alert(err.error || '保存配置失败');
-            return false;
-        }
-
-        if (accountForAllocation === accountId) {
-            await fetchAllocations(accountId);
-        }
-        fetchAllPortfolios(false);
-        return true;
-    };
-
-    const handleAddAllocation = async () => {
-        if (!accountForAllocation || !newAllocation.targetPercent) {
-            return alert('请填写完整的配置信息');
-        }
-
-        const newPercent = parseFloat(newAllocation.targetPercent);
-        if (Number.isNaN(newPercent) || newPercent < 0 || newPercent > 100) {
-            return alert('目标比例必须在 0 到 100 之间');
-        }
-
-        let assetId: number;
-
-        if (newAllocation.assetType === 'new') {
-            // Create new asset first
-            if (!newAllocation.newAssetName || !newAllocation.newAssetSymbol) {
-                return alert('请填写新资产的名称和代码');
-            }
-
-            const assetRes = await fetch('/api/assets', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: newAllocation.newAssetName,
-                    symbol: newAllocation.newAssetSymbol,
-                    type: 'stock', // Default type
-                    currentPrice: 0, // Default price
-                }),
-            });
-
-            if (!assetRes.ok) {
-                const err = await assetRes.json();
-                return alert(err.error || '创建新资产失败');
-            }
-
-            const newAsset = await assetRes.json();
-            assetId = newAsset.id;
-        } else {
-            // Use existing asset
-            if (!newAllocation.assetId) {
-                return alert('请选择资产');
-            }
-            assetId = parseInt(newAllocation.assetId);
-        }
-
-        const saved = await handleUpsertAllocationTarget(accountForAllocation, assetId, newPercent);
-
-        if (saved) {
-            setNewAllocation({
-                assetType: 'existing',
-                assetId: '',
-                targetPercent: '',
-                newAssetName: '',
-                newAssetSymbol: ''
-            });
-            await fetchAvailableAssets(); // Refresh asset list
-        }
-    };
-
-    const handleUpdateAllocation = async (id: number, targetPercent: number) => {
-        const currentTotal = allocations.reduce((sum, alloc) =>
-            sum + (alloc.id === id ? 0 : alloc.targetPercent), 0
-        );
-
-        if (currentTotal + targetPercent > 100) {
-            return alert('配置比例总和不能超过100%');
-        }
-
-        const res = await fetch(`/api/allocations/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetPercent }),
-        });
-
-        if (res.ok) {
-            await fetchAllocations(accountForAllocation!);
-            fetchAllPortfolios(false); // 不显示加载状态
-        } else {
-            const err = await res.json();
-            alert(err.error || '更新配置失败');
-        }
-    };
-
-    const handleDeleteAllocation = async (id: number) => {
-        if (confirm('确定要删除这个配置吗？')) {
-            const res = await fetch(`/api/allocations/${id}`, {
-                method: 'DELETE',
-            });
-
-            if (res.ok) {
-                await fetchAllocations(accountForAllocation!);
-                fetchAllPortfolios(false); // 不显示加载状态
-            } else {
-                const err = await res.json();
-                alert(err.error || '删除配置失败');
-            }
-        }
-    };
-
-    const openAllocationDialog = async (accountId: number) => {
-        setAccountForAllocation(accountId);
-        await Promise.all([
-            fetchAllocations(accountId),
-            fetchAvailableAssets()
-        ]);
-        setIsAllocationOpen(true);
-    };
-
     // --- Helpers ---
-
-    const openTxDialog = (accountId: number) => {
-        setSelectedAccountId(accountId);
-        setNewTx(prev => ({ ...prev, accountId, type: 'buy', symbol: '', price: '' }));
-        setIsTxOpen(true);
-    };
-
-    const openSellDialog = (accountId: number, symbol: string, currentShares: number) => {
-        setSelectedAccountId(accountId);
-        setNewTx(prev => ({
-            ...prev,
-            accountId,
-            type: 'sell',
-            symbol,
-            shares: currentShares.toString(),
-            price: ''
-        }));
-        setIsTxOpen(true);
-    };
 
     const openDeleteDialog = (accountId: number) => {
         setAccountToDelete(accountId);
@@ -758,7 +357,16 @@ export default function Home() {
 
         setSubmittingHolding(true);
         try {
-            const payload: any = {
+            const payload: {
+                accountId: number;
+                shares: number;
+                avgCost?: number;
+                currentPrice?: number;
+                assetId?: number;
+                symbol?: string;
+                name?: string;
+                assetType?: string;
+            } = {
                 accountId: manualHoldingAccount.id,
                 shares: parseFloat(manualHolding.shares),
             };
@@ -830,59 +438,6 @@ export default function Home() {
         }
     };
 
-    // --- Transaction History Functions ---
-
-    const fetchTransactions = async (accountId?: number) => {
-        setLoadingTransactions(true);
-        try {
-            const url = accountId ? `/api/transactions?accountId=${accountId}` : '/api/transactions';
-            const res = await fetch(url);
-            const data = await res.json();
-            if (Array.isArray(data)) {
-                setTransactions(data);
-            } else {
-                setTransactions([]);
-            }
-        } catch (error) {
-            console.error('Failed to fetch transactions', error);
-            setTransactions([]);
-        } finally {
-            setLoadingTransactions(false);
-        }
-    };
-
-    const openTransactionHistory = async (accountId: number) => {
-        setSelectedAccountForHistory(accountId);
-        setTransactionFilterSymbol('');
-        await fetchTransactions(accountId);
-        setIsTransactionHistoryOpen(true);
-    };
-
-    const handleDeleteTransaction = async (transactionId: number) => {
-        if (!confirm('确定要删除这条交易记录吗？删除后会自动同步更新持仓和现金余额。')) {
-            return;
-        }
-
-        try {
-            const res = await fetch(`/api/transactions/${transactionId}`, {
-                method: 'DELETE',
-            });
-
-            if (res.ok) {
-                // 刷新交易记录和持仓数据
-                await fetchTransactions(selectedAccountForHistory || undefined);
-                await fetchAllPortfolios();
-                alert('交易记录已删除，持仓和现金已同步更新');
-            } else {
-                const err = await res.json();
-                alert(err.error || '删除失败');
-            }
-        } catch (error) {
-            console.error('Failed to delete transaction', error);
-            alert('删除失败');
-        }
-    };
-
     const totalAssets = portfolios.reduce((sum, p) => sum + p.account.totalValue, 0);
 
     // Sorting function
@@ -917,15 +472,6 @@ export default function Home() {
 
             return 0;
         });
-    };
-
-    // Filter transactions by symbol
-    const getFilteredTransactions = () => {
-        if (!transactionFilterSymbol) return transactions;
-        return transactions.filter(tx => 
-            tx.asset?.symbol?.toLowerCase().includes(transactionFilterSymbol.toLowerCase()) ||
-            tx.asset?.name?.toLowerCase().includes(transactionFilterSymbol.toLowerCase())
-        );
     };
 
     return (
@@ -1406,7 +952,22 @@ export default function Home() {
                                                             }}
                                                         >
                                                             <span className="truncate">{a.name || a.symbol} <span className="opacity-60">({a.accountName})</span></span>
-                                                            <span className="font-mono shrink-0 ml-2">{summary.totalValue > 0 ? ((a.value / summary.totalValue) * 100).toFixed(2) : '0.00'}%</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono shrink-0">{summary.totalValue > 0 ? ((a.value / summary.totalValue) * 100).toFixed(2) : '0.00'}%</span>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="h-6 px-2 text-xs text-muted-foreground hover:text-primary"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setQuickCategoryAssetId(a.assetId);
+                                                                        setIsQuickCategoryOpen(true);
+                                                                    }}
+                                                                    title="设置分类"
+                                                                >
+                                                                    设分类
+                                                                </Button>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1752,16 +1313,12 @@ export default function Home() {
                             <TrendingUp className="mr-2 h-4 w-4" /> 配置
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => {
-                            setSelectedAccountId(portfolio.account.id);
-                            setNewTx(prev => ({ ...prev, accountId: portfolio.account.id, type: 'buy', symbol: '', price: '' }));
-                            setIsTxOpen(true);
+                            openBuyDialog(portfolio.account.id);
                         }}>
                             <Plus className="mr-2 h-4 w-4" /> 买入
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => {
-                            setSelectedAccountId(portfolio.account.id);
-                            setNewTx(prev => ({ ...prev, accountId: portfolio.account.id, type: 'sell', symbol: '', price: '' }));
-                            setIsTxOpen(true);
+                            openSellDialog(portfolio.account.id, '', 0);
                         }}>
                             <DollarSign className="mr-2 h-4 w-4" /> 卖出
                         </Button>
@@ -1788,7 +1345,7 @@ export default function Home() {
                     <div className="grid gap-4 py-4">
                         <div className="grid grid-cols-1 gap-2">
                             <Label>类型</Label>
-                            <Select value={newTx.type} onValueChange={v => setNewTx({ ...newTx, type: v })}>
+                            <Select value={newTx.type} onValueChange={v => setNewTx({ ...newTx, type: v as 'buy' | 'sell' })}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="buy">买入 (Buy)</SelectItem>
@@ -1858,6 +1415,21 @@ export default function Home() {
                                 value={newTx.date}
                                 onChange={e => setNewTx({ ...newTx, date: e.target.value })} />
                         </div>
+                        <div className="flex items-start gap-3 rounded-lg border border-dashed px-3 py-2">
+                            <input
+                                id="syncCash"
+                                type="checkbox"
+                                checked={newTx.syncCash}
+                                onChange={e => setNewTx({ ...newTx, syncCash: e.target.checked })}
+                                className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                            />
+                            <div className="grid gap-1">
+                                <Label htmlFor="syncCash">同步账户余额</Label>
+                                <p className="text-xs text-muted-foreground">
+                                    关闭后仅记录交易和持仓，不调整现金余额，适合漏记补记的场景。
+                                </p>
+                            </div>
+                        </div>
                     </div>
                     <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0 sm:justify-end">
                         <Button variant="outline" onClick={() => setIsTxOpen(false)} className="flex-1 sm:flex-initial">取消</Button>
@@ -1925,7 +1497,7 @@ export default function Home() {
                             <Label className="text-xs">资产类型</Label>
                             <Select
                                 value={newAllocation.assetType}
-                                onValueChange={v => setNewAllocation({ ...newAllocation, assetType: v, assetId: '', newAssetName: '', newAssetSymbol: '' })}
+                                onValueChange={v => setNewAllocation({ ...newAllocation, assetType: v as 'existing' | 'new', assetId: '', newAssetName: '', newAssetSymbol: '' })}
                             >
                                 <SelectTrigger className="h-8">
                                     <SelectValue />
@@ -2211,7 +1783,7 @@ export default function Home() {
                         
                         {loadingTransactions ? (
                             <div className="text-center py-8">加载中...</div>
-                        ) : getFilteredTransactions().length === 0 ? (
+                        ) : filteredTransactions.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground">
                                 {transactionFilterSymbol ? '没有找到匹配的交易记录' : '暂无交易记录'}
                             </div>
@@ -2229,7 +1801,7 @@ export default function Home() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {getFilteredTransactions().map((tx) => (
+                                    {filteredTransactions.map((tx) => (
                                         <TableRow key={tx.id}>
                                             <TableCell>
                                                 {new Date(tx.date).toLocaleDateString('zh-CN')}

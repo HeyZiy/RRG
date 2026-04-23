@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
+import { apiError, apiServerError, parseIntField } from '@/lib/api-response';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt((await params).id);
-    if (isNaN(id)) {
-      return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+    const id = parseIntField((await params).id);
+    if (id === null) {
+      return apiError('Invalid id', 400);
     }
 
     // 使用事务来确保数据一致性
@@ -23,7 +24,7 @@ export async function DELETE(
         throw new Error('Transaction not found');
       }
 
-      const { accountId, assetId, type, shares, amount } = transaction;
+      const { accountId, assetId, type, shares, amount, syncCash } = transaction;
 
       // 2. 获取当前持仓
       const holding = await tx.holding.findUnique({
@@ -67,12 +68,14 @@ export async function DELETE(
         }
       }
 
-      // 3. 恢复账户现金（买入删除则增加现金，卖出删除则减少现金）
-      const cashChange = type === 'buy' ? amount : -amount;
-      await tx.account.update({
-        where: { id: accountId },
-        data: { cash: { increment: cashChange } },
-      });
+      // 3. 恢复账户现金（仅当原交易同步过余额时才回滚现金）
+      if (syncCash) {
+        const cashChange = type === 'buy' ? amount : -amount;
+        await tx.account.update({
+          where: { id: accountId },
+          data: { cash: { increment: cashChange } },
+        });
+      }
 
       // 4. 删除交易记录
       await tx.transaction.delete({ where: { id } });
@@ -80,7 +83,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('Failed to delete transaction:', error);
-    return NextResponse.json({ error: 'Failed to delete transaction' }, { status: 500 });
+    return apiServerError('Failed to delete transaction', error);
   }
 }
